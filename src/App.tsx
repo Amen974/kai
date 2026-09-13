@@ -1,87 +1,116 @@
-import { useRef, useState } from 'react';
-import './App.css'
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import "./App.css";
+
+function useChatStream(
+  setResponse: React.Dispatch<React.SetStateAction<string>>,
+  setIsLoading: React.Dispatch<React.SetStateAction<boolean>>,
+) {
+  useEffect(() => {
+    const chunkListener = listen<string>("chat-chunk", (event) => {
+      setResponse((current) => current + event.payload);
+    });
+
+    const doneListener = listen("chat-done", () => {
+      setIsLoading(false);
+    });
+
+    return () => {
+      chunkListener.then((cleanup) => cleanup());
+      doneListener.then((cleanup) => cleanup());
+    };
+  }, [setResponse, setIsLoading]);
+}
 
 function App() {
-  const message = useRef<HTMLInputElement>(null);
-  const [response, setResponse] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const [response, setResponse] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
+
+  useChatStream(setResponse, setIsLoading);
 
   const sendMessage = async () => {
-    const currentMessage = message.current?.value;
+    const message = inputRef.current?.value.trim();
 
-    if (!currentMessage) return;
+    if (!message || isLoading) return;
 
     setIsLoading(true);
-    setError('');
-    setResponse('');
+    setError("");
+    setResponse("");
 
     try {
-      const result = await fetch('http://localhost:11434/api/generate', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'qwen3:4b',
-          prompt: currentMessage,
-          stream: false,
-        }),
-      });
-
-      if (!result.ok) {
-        throw new Error(`Ollama returned ${result.status}`);
-      }
-
-      const data: { response?: string } = await result.json();
-      setResponse(data.response ?? 'No response received.');
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Unable to reach Ollama.');
-    } finally {
+      await invoke("send_message", { message });
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : `Something went wrong ${error}.`,
+      );
       setIsLoading(false);
     }
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      sendMessage();
+    }
+  };
+
   return (
-    <main className='grid min-h-screen place-items-center bg-[radial-gradient(circle_at_15%_10%,rgba(170,203,62,0.12),transparent_28%),linear-gradient(135deg,#111413_0%,#1a201e_52%,#101312_100%)] px-4.5 py-8 font-["Trebuchet_MS","Segoe_UI",sans-serif] text-[#f2f1eb]'>
-      <section className='flex min-h-[min(720px,calc(100vh-64px))] w-full max-w-190 flex-col border border-[rgba(236,240,218,0.14)] bg-[rgba(24,29,27,0.88)] p-[clamp(24px,5vw,52px)] shadow-[0_28px_80px_rgba(0,0,0,0.3)] max-[480px]:min-h-screen max-[480px]:px-5 max-[480px]:py-7'>
-        <header className='flex items-start justify-between border-b border-[rgba(236,240,218,0.12)] pb-7'>
-          <div>
-            <p className='mb-2.5 text-[0.68rem] uppercase tracking-[0.12em] text-[#b3d84c]'>LOCAL MODEL / READY</p>
-            <h1 className='font-serif text-[clamp(2.2rem,6vw,4.3rem)] font-normal leading-[0.95] tracking-[-0.04em] text-[#f4f5ed]'>AI chat</h1>
-          </div>
-          <span className='mt-2 h-2.75 w-2.75 rounded-full bg-[#b3d84c] shadow-[0_0_0_5px_rgba(179,216,76,0.12)]' aria-label='Ollama connection status' />
+    <main className="min-h-screen bg-[#101312] p-8 text-[#f2f1eb]">
+      <section className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-190 flex-col">
+        <header className="border-b border-white/10 pb-6">
+          <p className="text-xs uppercase tracking-widest text-[#b3d84c]">
+            LOCAL MODEL / READY
+          </p>
+
+          <h1 className="mt-2 font-serif text-5xl">AI chat</h1>
         </header>
 
-        <div className='flex flex-1 items-center py-10.5'>
-          {!isLoading && !error && !response && (
-            <div className='text-[#d5d9ce]'>
-              <span className='mb-4 block text-[2.5rem] font-light leading-[0.7] text-[#b3d84c]'>+</span>
-              <p className='mb-2 font-serif text-[1.55rem]'>Ask something to begin.</p>
-              <small className='text-[0.68rem] tracking-[0.04em] text-[#9aa49b]'>Your prompt will be sent to llama3.2 locally.</small>
+        <div className="flex flex-1 items-center overflow-auto py-10">
+          {!response && !error && !isLoading && (
+            <div>
+              <p className="font-serif text-2xl">Ask something to begin.</p>
+
+              <p className="mt-2 text-sm text-white/50">
+                Your prompt will be sent to qwen3:4b locally.
+              </p>
             </div>
           )}
-          {isLoading && <p className='flex items-center gap-2.5 text-[#b3d84c]'><span className='h-1.75 w-1.75 animate-pulse rounded-full bg-[#b3d84c]' />Thinking...</p>}
-          {error && <p className='m-0 text-[#f19b89]'>{error}</p>}
-          {!isLoading && !error && response && <p className='m-0 w-full whitespace-pre-wrap border-l-[3px] border-[#b3d84c] px-6 py-5.5 text-[1.05rem] leading-7 text-[#f0f2e8]'>{response}</p>}
+
+          {isLoading && !response && (
+            <p className="text-[#b3d84c]">Thinking...</p>
+          )}
+
+          {error && <p className="text-red-400">{error}</p>}
+
+          {response && (
+            <p className="w-full whitespace-pre-wrap border-l-2 border-[#b3d84c] px-6 py-4 leading-7">
+              {response}
+            </p>
+          )}
         </div>
 
-        <div className='flex gap-2.5 border border-[rgba(236,240,218,0.18)] bg-[rgba(10,13,12,0.6)] p-1.75'>
+        <div className="flex gap-2 border border-white/15 bg-black/20 p-2">
           <input
-            type='text'
-            placeholder='Ask a question...'
-            aria-label='Message'
-            ref={message}
-            className='min-w-0 flex-1 bg-transparent px-3.5 py-3 text-[#f4f5ed] outline-none placeholder:text-[#7d877e]'
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') sendMessage();
-            }}
+            ref={inputRef}
+            type="text"
+            placeholder="Ask a question..."
+            className="min-w-0 flex-1 bg-transparent px-3 py-2 outline-none"
+            onKeyDown={handleKeyDown}
+            disabled={isLoading}
           />
-          <button type='button' className='cursor-pointer border-0 bg-[#b3d84c] px-4.25 text-[0.86rem] font-bold text-[#151912] hover:bg-[#c6ea5b] disabled:cursor-wait disabled:opacity-65 max-[480px]:px-3.25' onClick={sendMessage} disabled={isLoading}>
-            {isLoading ? '...' : 'Send'} <span aria-hidden='true'>-&gt;</span>
+
+          <button
+            type="button"
+            onClick={sendMessage}
+            disabled={isLoading}
+            className="bg-[#b3d84c] px-5 font-bold text-[#151912] disabled:opacity-50"
+          >
+            {isLoading ? "..." : "Send →"}
           </button>
         </div>
-        <p className='m-[15px_0_0] text-right text-[0.62rem] uppercase tracking-[0.08em] text-[#9aa49b]'>Powered by Ollama <span className='px-1.25 text-[#b3d84c]'>•</span> llama3.2</p>
       </section>
     </main>
   );
