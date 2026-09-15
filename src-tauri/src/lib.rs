@@ -1,34 +1,12 @@
 use tokio::sync::Mutex;
-use crate::commands::ollama::send_message;
+use crate::commands::chat::send_message;
+use crate::state::MessageState;
 
 mod commands;
-
-struct MessageState {
-    messages: Vec<Message>,
-}
-
-#[derive(serde::Serialize)]
-#[derive(Clone)]
-struct Message {
-    role: &'static str,
-    content: String,
-}
-
-#[derive(serde::Serialize)]
-#[derive(Clone)]
-enum Role {
-    User,
-    Assistant,
-}
-
-impl Role {
-    fn as_str(&self) -> &'static str {
-        match self {
-            Role::User => "user",
-            Role::Assistant => "assistant",
-        }
-    }
-}
+mod models;
+mod services;
+mod ollama;
+mod state;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

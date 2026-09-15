@@ -1,42 +1,24 @@
 use futures_util::StreamExt;
 use tokio::sync::Mutex;
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 
-use crate::{Message, MessageState, Role::{ Assistant, User}};
+use crate::{MessageState, models::chat::{Message, OllamaRequest, OllamaResponse, Role::{Assistant, User}}, ollama::post_chat};
 
-#[derive(serde::Serialize)]
-#[derive(Clone)]
-struct OllamaRequest {
-    model: String,
-    messages: Vec<Message>,
-    stream: bool,
+pub enum Callback {
+    Message(String),
+    Done
 }
 
-#[derive(serde::Deserialize)]
-#[derive(Debug)]
-struct OllamaMessage {
-    content: String,
-}
-
-#[derive(serde::Deserialize)]
-struct OllamaResponse {
-    message: Option<OllamaMessage>,
-    done: bool,
-}
-
-#[tauri::command]
-pub async fn send_message(
-    app: AppHandle,
+pub async fn send(
     message: String,
     message_arr: State<'_, Mutex<MessageState>>,
+    callback: impl Fn(Callback)
 ) -> Result<(), String> {
-    let client = reqwest::Client::new();
-
     let messages = {
         let mut state = message_arr.lock().await;
 
         state.messages.push(Message {
-            role: User.as_str(),
+            role: User,
             content: message,
         });
 
@@ -49,19 +31,9 @@ pub async fn send_message(
         stream: true,
     };
 
-    let response = client
-        .post("http://localhost:11434/api/chat")
-        .json(&payload)
-        .send()
+    let response = post_chat(payload)
         .await
         .map_err(|error| error.to_string())?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "Ollama returned status: {}",
-            response.status()
-        ));
-    }
 
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
@@ -69,9 +41,6 @@ pub async fn send_message(
 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|error| error.to_string())?;
-
-        let text = String::from_utf8_lossy(&chunk);
-        println!("RAW CHUNK: {}", text);
 
         buffer.push_str(&String::from_utf8_lossy(&chunk));
 
@@ -85,27 +54,22 @@ pub async fn send_message(
 
             let data: OllamaResponse =
                 serde_json::from_str(&line).map_err(|error| error.to_string())?;
-            println!("PARSED: {:?}", line);
-            println!("AI RESPONSE: {:?}", data.message);
-            println!("DONE: {}", data.done);
 
             if let Some(message) = data.message {
                 full_message.push_str(&message.content);
 
-                app.emit("chat-chunk", message.content)
-                    .map_err(|error| error.to_string())?;
+                callback(Callback::Message(message.content));
             }
 
             if data.done {
                 let mut state = message_arr.lock().await;
 
                 state.messages.push(Message {
-                    role: Assistant.as_str(),
+                    role: Assistant,
                     content: full_message,
                 });
 
-                app.emit("chat-done", ())
-                    .map_err(|error| error.to_string())?;
+                callback(Callback::Done);
 
                 return Ok(());
             }
