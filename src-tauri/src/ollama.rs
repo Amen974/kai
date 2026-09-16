@@ -1,6 +1,6 @@
 use reqwest::Response;
 
-use crate::models::chat::OllamaRequest;
+use crate::models::chat_model::OllamaRequest;
 
 
 pub async fn post_chat(payload: OllamaRequest) -> Result<Response, String> {

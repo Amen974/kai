@@ -1,5 +1,11 @@
-use crate::models::chat::Message;
+use tokio_util::sync::CancellationToken;
 
-pub struct MessageState {
-    pub(crate) messages: Vec<Message>,
+use crate::models::chat_model::Message;
+
+pub struct MessageArray {
+    pub(crate) message_array: Vec<Message>
+}
+
+pub struct CancelToken {
+    pub(crate) token: Option<CancellationToken>
 }

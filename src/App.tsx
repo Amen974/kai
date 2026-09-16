@@ -51,6 +51,18 @@ function App() {
     }
   };
 
+  const cancelMessage = async () => {
+    try {
+      await invoke("cancel_token");
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : `Something went wrong ${error}.`,
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       sendMessage();
@@ -104,11 +116,10 @@ function App() {
 
           <button
             type="button"
-            onClick={sendMessage}
-            disabled={isLoading}
+            onClick={isLoading ? cancelMessage : sendMessage}
             className="bg-[#b3d84c] px-5 font-bold text-[#151912] disabled:opacity-50"
           >
-            {isLoading ? "..." : "Send →"}
+            {isLoading ? "Cancel" : "Send →"}
           </button>
         </div>
       </section>
