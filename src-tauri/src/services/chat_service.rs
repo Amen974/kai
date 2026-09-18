@@ -5,33 +5,33 @@ use tokio_util::{bytes, sync::CancellationToken};
 use tokio::select;
 
 use crate::{
-    MessageArray,
-    models::chat_model::{Message, OllamaRequest, OllamaResponse, Role::{Assistant, User}},
-    ollama::post_chat,
-    state::CancelToken,
+    ChatHistory, models::chat_model::{ChatMessage, OllamaRequest, OllamaResponse, Role::{Assistant, User}}, ollama::post_chat, state::CancelState,
 };
 
-pub enum Callback {
-    Message(String),
+pub enum StreamEvent {
+    Messages(Vec<ChatMessage>),
+    MessageChunk(String),
     Done
 }
 
 pub async fn send(
     message: String,
-    message_arr: State<'_, Mutex<MessageArray>>,
-    cancel_state: State<'_, Mutex<CancelToken>>,
-    callback: impl Fn(Callback)
+    message_arr: State<'_, Mutex<ChatHistory>>,
+    cancel_state: State<'_, Mutex<CancelState>>,
+    update_callback: impl Fn(StreamEvent)
 ) -> Result<(), String> {
     let messages = {
         let mut state = message_arr.lock().await;
 
-        state.message_array.push(Message {
+        state.messages.push(ChatMessage {
             role: User,
             content: message,
         });
 
-        state.message_array.clone()
+        state.messages.clone()
     };
+
+    update_callback(StreamEvent::Messages(messages.clone()));
 
     let payload = OllamaRequest {
         model: "qwen3:4b".to_string(),
@@ -39,37 +39,49 @@ pub async fn send(
         stream: true,
     };
 
-let response = post_chat(payload)
-    .await
-    .map_err(|error| error.to_string())?;
+    let response = post_chat(payload)
+        .await
+        .map_err(|error| error.to_string())?;
 
-let stream = response.bytes_stream();
+    let stream = response.bytes_stream();
 
-let token = CancellationToken::new();
-let cloned_token = token.clone();
+    let token = CancellationToken::new();
+    let cloned_token = token.clone();
 
-cancel_state.lock().await.token = Some(token);
+    cancel_state.lock().await.token = Some(token);
 
-process_stream(
-    stream,
-    message_arr,
-    cloned_token,
-    callback,
-).await?;
+    let result = process_stream(
+        stream,
+        &*message_arr,
+        cloned_token,
+        update_callback,
+    ).await;
 
-cancel_state.lock().await.token = None;
+    cancel_state.lock().await.token = None;
 
-Ok(())
+    result
 }
 
 async fn process_stream(
     mut stream: impl futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Unpin,
-    message_arr: State<'_, Mutex<MessageArray>>,
+    message_arr: &Mutex<ChatHistory>,
     token: CancellationToken,
-    callback: impl Fn(Callback),
+    update_callback: impl Fn(StreamEvent),
 ) -> Result<(), String> {
     let mut buffer = String::new();
-    let mut full_message = String::new();
+
+    let messages = {
+        let mut state = message_arr.lock().await;
+
+        state.messages.push(ChatMessage {
+            role: Assistant,
+            content: "".to_string(),
+        });
+
+        state.messages.clone()
+    };
+
+    let message_index = messages.len() - 1;
 
     loop {
         select! {
@@ -95,26 +107,22 @@ async fn process_stream(
                             .map_err(|error| error.to_string())?;
 
                     if let Some(message) = data.message {
-                        full_message.push_str(&message.content);
-                        callback(Callback::Message(message.content));
-                    }
-
-                    if data.done {
                         let mut state = message_arr.lock().await;
 
-                        state.message_array.push(Message {
-                            role: Assistant,
-                            content: full_message,
-                        });
+                        state.messages[message_index].content.push_str(&message.content);
 
-                        callback(Callback::Done);
+                        update_callback(StreamEvent::MessageChunk(message.content));
+                    }
+
+                    if data.done { 
+                        update_callback(StreamEvent::Done);
                         return Ok(());
                     }
+
                 }
             }
 
             _ = token.cancelled() => {
-                drop(stream);
                 return Ok(());
             }
         }

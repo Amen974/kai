@@ -1,6 +1,6 @@
 #[derive(serde::Serialize)]
 #[derive(Clone)]
-pub struct Message {
+pub struct ChatMessage {
     pub(crate) role: Role,
     pub(crate) content: String,
 }
@@ -17,7 +17,7 @@ pub enum Role {
 #[derive(Clone)]
 pub struct OllamaRequest {
     pub(crate) model: String,
-    pub(crate) messages: Vec<Message>,
+    pub(crate) messages: Vec<ChatMessage>,
     pub(crate) stream: bool,
 }
 
