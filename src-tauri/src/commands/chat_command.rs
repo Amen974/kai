@@ -14,13 +14,13 @@ pub async fn send_message(
 ) -> Result<(), String> {
     send(message, message_arr, cancel_state, |event| {
         match event {
-            StreamEvent::Messages(messages) => {
-                let _ = app.emit("update_messages", messages)
+            StreamEvent::Message(message) => {
+                let _ = app.emit("update_message", message)
                     .map_err(|error| error.to_string());
             }
 
             StreamEvent::MessageChunk(message) => {
-                let _ = app.emit("update_message", message)
+                let _ = app.emit("update_message_content", message)
                     .map_err(|error| error.to_string());
             }
 

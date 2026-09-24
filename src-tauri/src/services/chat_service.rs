@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub enum StreamEvent {
-    Messages(Vec<ChatMessage>),
+    Message(ChatMessage),
     MessageChunk(String),
     Done
 }
@@ -31,7 +31,7 @@ pub async fn send(
         state.messages.clone()
     };
 
-    update_callback(StreamEvent::Messages(messages.clone()));
+    update_callback(StreamEvent::Message(messages[messages.len() - 1].clone()));
 
     let payload = OllamaRequest {
         model: "qwen3:4b".to_string(),
@@ -80,6 +80,8 @@ async fn process_stream(
 
         state.messages.clone()
     };
+
+    update_callback(StreamEvent::Message(messages[messages.len() - 1].clone()));
 
     let message_index = messages.len() - 1;
 

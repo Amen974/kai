@@ -1,1 +1,56 @@
 @import "tailwindcss";
+
+body {
+    font-family: "Cormorant Garamond", serif;
+    color: #2b2a28;
+    scrollbar-width: none;
+    background-image: url("/bg.png");
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    min-height: 100vh;
+}
+
+.corner-bg {
+    background-image: url("/dark corner.png");
+    background-position: bottom left;
+    background-repeat: no-repeat;
+    background-size: contain;
+}
+
+.label {
+    font-family: "IBM Plex Mono", monospace;
+    letter-spacing: 0.2em;
+}
+
+.border {
+    border-color: #e0dbd3;
+}
+
+.highlight {
+    background-color: #e8e3da;
+}
+
+.muted-text {
+    color: #858078;
+}
+
+.secondary-text {
+    color: #4a4844;
+}
+
+.text {
+    color: #2b2a28;
+}
+
+.light {
+    color: #f1ede6;
+}
+
+.no-scrollbar {
+    scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
