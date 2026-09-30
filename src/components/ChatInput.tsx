@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import useKeyboardShortcut from "../hooks/useKeyboardShortcut";
 import { useLocation, useNavigate } from "react-router";
 import { invoke } from "@tauri-apps/api/core";
+import useMessages from "../store/messages";
 
 const MAX_HEIGHT = 200
 
@@ -9,6 +10,8 @@ const ChatInput = () => {
   const [open, setOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const currentId = useMessages().currentId;
+
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -21,7 +24,7 @@ const ChatInput = () => {
     setOpen(false);
   })
 
-  const handelSend = async (message: string) => {
+  const handleSend = async (message: string) => {
     if (!open || !message.trim()) return;
 
     setOpen(false);
@@ -30,7 +33,7 @@ const ChatInput = () => {
     if (location.pathname === "/") navigate("/chat");
 
     try {
-      await invoke("send_message", { message });
+      await invoke("send_message", { message, id: currentId ?? undefined });
     } catch (error) {
       console.log(error);
     }
@@ -69,7 +72,7 @@ const ChatInput = () => {
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
-            handelSend(inputValue);
+            handleSend(inputValue);
           }
         }}
         ref={inputRef}

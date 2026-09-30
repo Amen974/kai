@@ -1,10 +1,12 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import useMessages from "../store/messages";
+import { Message } from "../types";
 
 export const useMessageSync = () => {
   const addMessage = useMessages().addMessage;
   const addChunk = useMessages().addChunk;
+  const addThinkingChunk = useMessages().addThinkingChunk;
   const setMessages = useMessages().setMessages;
   const setLoading = useMessages().setIsloading;
 
@@ -26,11 +28,17 @@ export const useMessageSync = () => {
         },
       );
 
+      const unlistenThinking = await listen<string>(
+        "update_thinking_content",
+        (event) => {
+          if (active) addThinkingChunk(event.payload);
+        },
+      );
+
       const unlistenMessages = await listen<Message[]>(
         "update_messages",
         (event) => {
           if (active) {
-            console.log("[MessageSync] received update_messages", event.payload);
             setMessages(event.payload);
           }
         },
@@ -43,6 +51,7 @@ export const useMessageSync = () => {
       return () => {
         unlistenNew();
         unlistenContent();
+        unlistenThinking();
         unlistenMessages();
         unlistenDone();
       };
@@ -54,5 +63,5 @@ export const useMessageSync = () => {
       active = false;
       void cleanupPromise.then((cleanup) => cleanup());
     };
-  }, [addMessage, addChunk, setMessages, setLoading]);
+  }, [addMessage, addChunk, addThinkingChunk, setMessages, setLoading]);
 };

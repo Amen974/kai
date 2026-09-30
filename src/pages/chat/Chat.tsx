@@ -5,8 +5,39 @@ import { invoke } from "@tauri-apps/api/core";
 import useKeyboardShortcut from "../../hooks/useKeyboardShortcut";
 import EditInput from "../../components/EditInput";
 
+const ThinkingBlock = ({ thinking, hasContent }: { thinking: string; hasContent: boolean }) => {
+  const [open, setOpen] = useState(true);
+
+  useEffect(() => {
+    if (hasContent) setOpen(false);
+  }, [hasContent]);
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 text-xs tracking-widest opacity-50 hover:opacity-80 transition-opacity"
+      >
+        <span
+          className={`inline-block transition-transform duration-200 ${open ? "rotate-90" : "rotate-0"}`}
+        >
+          ▶
+        </span>
+        {hasContent ? "Thought" : "Thinking…"}
+      </button>
+
+      {open && (
+        <div className="mt-2 pl-4 border-l border-current opacity-40 text-sm leading-relaxed whitespace-pre-wrap">
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Chat = () => {
   const messages = useMessages().messages;
+  const isLoading = useMessages().isLoading;
   const bottomRef = useRef<HTMLDivElement>(null);
   const setLoading = useMessages().setIsloading;
   const [editIndex, setEditIndex] = useState(0);
@@ -23,7 +54,12 @@ const Chat = () => {
   })
 
   useKeyboardShortcut("ctrl+e",() => {
-    const nextEditIndex = messages.length - 2;
+    let nextEditIndex
+    if(messages[messages.length - 1].role === 'user') {
+      nextEditIndex = messages.length - 1;
+    } else {
+      nextEditIndex = messages.length - 2;
+    }
     if (nextEditIndex < 0) {
       return;
     }
@@ -87,19 +123,43 @@ const Chat = () => {
   };
 
   return (
-    <div ref={bottomRef} className="h-screen w-[60vw] absolute left-1/2 -translate-x-1/2 flex flex-col gap-10 overflow-y-scroll no-scrollbar pt-20">
+    <div className="h-screen w-[60vw] absolute left-1/2 -translate-x-1/2 flex flex-col gap-10 overflow-y-scroll no-scrollbar pt-20">
       {messages.map((message, i) => {
-        return message.role === 'user' ? (
-          <div key={i} className="flex justify-end text-right">
-            <p className="w-[70%]">{message.content}</p>
-          </div>
-        ) : (
+        const isLast = i === messages.length - 1;
+
+        if (message.role === 'user') {
+          return (
+            <div key={i} className="flex justify-end text-right">
+              <p className="w-[70%]">{message.content}</p>
+            </div>
+          );
+        }
+
+        // Assistant message — three phases
+        const isProcessing = isLoading && isLast && !message.content && !message.thinking;
+        const hasThinking  = !!message.thinking;
+        const hasContent   = !!message.content;
+
+        return (
           <div key={i}>
-              <ReactMarkdown>
-                {message.content}
-              </ReactMarkdown>
+            {isProcessing && (
+              <span className="opacity-40 text-sm tracking-widest animate-pulse">
+                Processing…
+              </span>
+            )}
+
+            {hasThinking && (
+              <ThinkingBlock
+                thinking={message.thinking!}
+                hasContent={hasContent}
+              />
+            )}
+
+            {hasContent && (
+              <ReactMarkdown>{message.content}</ReactMarkdown>
+            )}
           </div>
-        )
+        );
       })}
       <div ref={bottomRef} className="h-10"></div>
       <EditInput

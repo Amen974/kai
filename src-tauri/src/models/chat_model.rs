@@ -26,6 +26,8 @@ pub struct OllamaRequest {
 #[derive(Debug)]
 pub struct OllamaMessage {
     pub(crate) content: String,
+    #[serde(default)]
+    pub(crate) thinking: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -33,4 +35,11 @@ pub struct OllamaMessage {
 pub struct OllamaResponse {
     pub(crate) message: Option<OllamaMessage>,
     pub(crate) done: bool,
+}
+
+#[derive(serde::Serialize)]
+#[derive(Clone)]
+pub struct GetHistory {
+    pub(crate) id: u32,
+    pub(crate) title: String,
 }
