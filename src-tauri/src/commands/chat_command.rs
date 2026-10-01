@@ -65,9 +65,8 @@ pub async fn edit_message(
 #[tauri::command]
 pub fn get_history(
     pool: State<'_, std::sync::Mutex<Connection>>,
-    offset: i32,
 ) -> Result<Vec<GetHistory>, String> {
-    chat_service::get_history(&*pool, offset)
+    chat_service::get_history(&*pool)
 }
 
 #[tauri::command]

@@ -19,7 +19,7 @@ const HistoryPanel = () => {
     }
 
     try {
-      const result = await invoke<Conversation[]>("get_history", { offset: 0 });
+      const result = await invoke<Conversation[]>("get_history");
       setHistory(result);
       setOpen(true);
     } catch (error) {

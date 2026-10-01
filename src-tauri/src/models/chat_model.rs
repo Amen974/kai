@@ -21,6 +21,14 @@ pub struct OllamaRequest {
     pub(crate) stream: bool,
 }
 
+#[derive(serde::Serialize)]
+#[derive(Clone)]
+pub struct OllamaRequestGenerate {
+    pub(crate) model: String,
+    pub(crate) prompt: String,
+    pub(crate) stream: bool,
+}
+
 #[derive(serde::Deserialize)]
 #[derive(serde::Serialize)]
 #[derive(Debug)]
@@ -34,6 +42,13 @@ pub struct OllamaMessage {
 #[derive(serde::Serialize)]
 pub struct OllamaResponse {
     pub(crate) message: Option<OllamaMessage>,
+    pub(crate) done: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[allow(dead_code)]
+pub struct OllamaGenerateResponse {
+    pub(crate) response: String,
     pub(crate) done: bool,
 }
 
