@@ -307,3 +307,20 @@ pub async fn create_tile(content: &String, id: &u32, pool: &std::sync::Mutex<Con
 
     Ok(())
 }
+
+pub async fn recend_handel(
+    id: u32,
+    pool: &State<'_, std::sync::Mutex<Connection>>,
+    message_arr: &State<'_, Mutex<ChatHistory>>,
+) -> Result<(), String> {
+    {
+        let mut messages = message_arr.lock().await;
+        messages.messages.pop();
+    }
+
+    let conn = pool.lock().map_err(|_| "database lock poisoned".to_string())?;
+    conn.execute("DELETE FROM messages WHERE history_id = ?1 ORDER BY id DESC LIMIT 1;", [id])
+        .map_err(|error| error.to_string())?;
+
+    Ok(())
+}

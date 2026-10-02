@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import useKeyboardShortcut from "../../hooks/useKeyboardShortcut";
 import EditInput from "../../components/EditInput";
+import { useNavigate } from "react-router";
 
 const ThinkingBlock = ({ thinking, hasContent }: { thinking: string; hasContent: boolean }) => {
   const [open, setOpen] = useState(true);
@@ -40,9 +41,11 @@ const Chat = () => {
   const isLoading = useMessages().isLoading;
   const bottomRef = useRef<HTMLDivElement>(null);
   const setLoading = useMessages().setIsloading;
+  const currentId = useMessages().currentId;
   const [editIndex, setEditIndex] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [editingMessage, setEditingMessage] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
@@ -99,6 +102,10 @@ const Chat = () => {
     editMessage();
   })
 
+    useKeyboardShortcut("ctrl+n",() => {
+      navigate('/');
+    })
+
   const cancelMessage = async () => {
     try {
       await invoke("cancel_token");
@@ -122,6 +129,19 @@ const Chat = () => {
     }
   };
 
+  const resendMessage = async (message: string) => {
+    if (currentId === null) return;
+
+    try {
+      await invoke("recend_message", { message, id: currentId });
+    } catch (error) {
+      setLoading(false);
+      console.log(
+        error instanceof Error ? error.message : `Something went wrong ${error}.`,
+      );
+    }
+  };
+
   return (
     <div className="h-screen w-[60vw] absolute left-1/2 -translate-x-1/2 flex flex-col gap-10 overflow-y-scroll no-scrollbar pt-20">
       {messages.map((message, i) => {
@@ -135,7 +155,6 @@ const Chat = () => {
           );
         }
 
-        // Assistant message — three phases
         const isProcessing = isLoading && isLast && !message.content && !message.thinking;
         const hasThinking  = !!message.thinking;
         const hasContent   = !!message.content;
@@ -158,6 +177,19 @@ const Chat = () => {
             {hasContent && (
               <ReactMarkdown>{message.content}</ReactMarkdown>
             )}
+
+            {currentId !== null &&
+              !isLoading &&
+              isLast &&
+              i > 0 &&
+              messages[i - 1].role === "user" && (
+                <button
+                  onClick={() => resendMessage(messages[i - 1].content)}
+                  className="mt-3 text-xs tracking-widest opacity-40 hover:opacity-80 transition-opacity"
+                >
+                  Resend
+                </button>
+              )}
           </div>
         );
       })}

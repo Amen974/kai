@@ -10,6 +10,8 @@ const HistoryPanel = () => {
   const [history, setHistory] = useState<Conversation[]>([]);
 
   const setCurrentId = useMessages().setCurrentId;
+  const currentId = useMessages().currentId;
+  const setMessages = useMessages().setMessages;
   const navigate = useNavigate();
 
   useKeyboardShortcut("ctrl+h", async () => {
@@ -42,6 +44,21 @@ const HistoryPanel = () => {
     }
   };
 
+  const handleDelete = async (id: number) => {
+    try {
+      await invoke("delete_history", { id });
+      setHistory((currentHistory) => currentHistory.filter((conv) => conv.id !== id));
+
+      if (currentId === id) {
+        setCurrentId(null);
+        setMessages([]);
+        navigate("/");
+      }
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -63,12 +80,19 @@ const HistoryPanel = () => {
             </li>
           ) : (
             history.map((conv) => (
-              <li
-                key={conv.id}
-                onClick={() => handleSelect(conv.id)}
-                className="px-6 py-3 text-sm tracking-wide cursor-pointer hover:bg-black/5 transition-colors"
-              >
-                {conv.title}
+              <li key={conv.id} className="flex items-center hover:bg-black/5 transition-colors">
+                <button
+                  onClick={() => handleSelect(conv.id)}
+                  className="px-6 py-3 text-sm tracking-wide text-left flex-1"
+                >
+                  {conv.title}
+                </button>
+                <button
+                  onClick={() => handleDelete(conv.id)}
+                  className="px-6 py-3 text-xs tracking-wide opacity-50 hover:opacity-100"
+                >
+                  Delete
+                </button>
               </li>
             ))
           )}

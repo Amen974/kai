@@ -1,6 +1,6 @@
 use tauri::Manager;
 use tokio::sync::Mutex;
-use crate::commands::chat_command::{cancel_token, edit_message, get_history, get_messages, send_message};
+use crate::commands::chat_command::{cancel_token, edit_message, get_history, get_messages, send_message, delete_history, recend_message};
 use crate::state::{ChatHistory, CancelState};
 
 
@@ -29,7 +29,7 @@ pub fn run() {
             token: None,
         }))
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![send_message, cancel_token, edit_message, get_history, get_messages])
+        .invoke_handler(tauri::generate_handler![send_message, cancel_token, edit_message, get_history, get_messages, delete_history, recend_message])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

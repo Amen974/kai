@@ -30,7 +30,7 @@ pub fn init(app: &AppHandle) -> Result<Connection,  Box<dyn std::error::Error>> 
             role TEXT NOT NULL,
             content TEXT NOT NULL,
             created_at TEXT NOT NULL,
-            FOREIGN KEY (history_id) REFERENCES history (id)
+            FOREIGN KEY (history_id) REFERENCES history (id) ON DELETE CASCADE
         )",
         [],
     )?;

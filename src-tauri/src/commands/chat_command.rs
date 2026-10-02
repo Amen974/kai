@@ -3,9 +3,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use crate::{
-    models::chat_model::GetHistory,
-    services::chat_service::{self, StreamEvent},
-    state::{CancelState, ChatHistory},
+    models::chat_model::GetHistory, services::chat_service::{self, StreamEvent, recend_handel}, state::{CancelState, ChatHistory},
 };
 
 #[tauri::command]
@@ -82,4 +80,29 @@ pub async fn get_messages(
         .map_err(|error| error.to_string())?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_history (id: u32, pool: State<'_, std::sync::Mutex<Connection>>,) -> Result<(), String> {
+    let conn = pool.lock().map_err(|error| error.to_string())?;
+
+    conn.execute("DELETE FROM history WHERE id = ?1", [id]).map_err(|error| error.to_string())?;
+
+    return Ok(());
+}
+
+#[tauri::command]
+pub async fn recend_message (
+    app: AppHandle,
+    message: String,
+    message_arr: State<'_, Mutex<ChatHistory>>,
+    cancel_state: State<'_, Mutex<CancelState>>,
+    id: Option<u32>,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<(), String> {
+    let id = id.ok_or_else(|| "need id".to_string())?;
+    recend_handel(id, &pool, &message_arr).await?;
+
+    send_message(app, message, message_arr, cancel_state, Some(id), pool).await?;
+    return Ok(());
 }
