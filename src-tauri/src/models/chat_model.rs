@@ -1,8 +1,11 @@
+use tokio_util::sync::CancellationToken;
+
 #[derive(serde::Serialize)]
 #[derive(Clone)]
 pub struct ChatMessage {
     pub(crate) role: Role,
     pub(crate) content: String,
+    pub(crate) thinking: Option<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -11,6 +14,23 @@ pub struct ChatMessage {
 pub enum Role {
     User,
     Assistant
+}
+
+impl Role {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Role::User => "user",
+            Role::Assistant => "assistant",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "user" => Some(Role::User),
+            "assistant" => Some(Role::Assistant),
+            _ => None,
+        }
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -46,10 +66,8 @@ pub struct OllamaResponse {
 }
 
 #[derive(serde::Deserialize)]
-#[allow(dead_code)]
 pub struct OllamaGenerateResponse {
     pub(crate) response: String,
-    pub(crate) done: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -58,3 +76,15 @@ pub struct GetHistory {
     pub(crate) id: u32,
     pub(crate) title: String,
 }
+
+pub struct ActiveStream {
+    pub generation_id: u32,
+    pub token: CancellationToken,
+}
+
+#[derive(serde::Serialize, Clone)]
+pub struct SessionSnapshot {
+    pub history_id: Option<u32>,
+    pub messages: Vec<ChatMessage>,
+    pub generating: bool,
+}

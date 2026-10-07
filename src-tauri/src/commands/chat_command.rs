@@ -1,108 +1,121 @@
 use rusqlite::Connection;
+use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use crate::{
-    models::chat_model::GetHistory, services::chat_service::{self, StreamEvent, recend_handel}, state::{CancelState, ChatHistory},
+    database::repository,
+    models::{
+        chat_event::ChatEvent,
+        chat_model::{GetHistory, SessionSnapshot},
+        error_model::ChatError,
+    },
+    services::chat_service,
+    state::ChatSession,
 };
+
+fn emit_event<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
+    if let Err(error) = app.emit(event, payload) {
+        eprintln!("Failed to emit Tauri event '{event}': {error}");
+    }
+}
+
+fn make_callback(app: AppHandle) -> impl Fn(ChatEvent) {
+    move |event| match event {
+        ChatEvent::Snapshot { messages, .. } => {
+            emit_event(&app, "update_messages", messages);
+        }
+        ChatEvent::ThinkingDelta { thinking } => {
+            emit_event(&app, "update_thinking_content", thinking);
+        }
+        ChatEvent::ContentDelta { content } => {
+            emit_event(&app, "update_message_content", content);
+        }
+        ChatEvent::GenerationFinished { .. } => {
+            emit_event(&app, "emit_done", ());
+        }
+        ChatEvent::Error { message } => {
+            emit_event(&app, "chat_error", message);
+            emit_event(&app, "emit_done", ());
+        }
+        ChatEvent::HistoryChanged => {
+            emit_event(&app, "history_changed", ());
+        }
+    }
+}
 
 #[tauri::command]
 pub async fn send_message(
     app: AppHandle,
     message: String,
-    message_arr: State<'_, Mutex<ChatHistory>>,
-    cancel_state: State<'_, Mutex<CancelState>>,
-    id: Option<u32>,
+    chat_session: State<'_, Mutex<ChatSession>>,
     pool: State<'_, std::sync::Mutex<Connection>>,
-) -> Result<(), String> {
-    chat_service::send(message, message_arr, cancel_state, id, pool, |event| {
-        match event {
-            StreamEvent::Message(message) => {
-                let _ = app.emit("update_message", message)
-                    .map_err(|error| error.to_string());
-            }
-
-            StreamEvent::ThinkingChunk(chunk) => {
-                let _ = app.emit("update_thinking_content", chunk)
-                    .map_err(|error| error.to_string());
-            }
-
-            StreamEvent::MessageChunk(message) => {
-                let _ = app.emit("update_message_content", message)
-                    .map_err(|error| error.to_string());
-            }
-
-            StreamEvent::Done => {
-                let _ = app.emit("emit_done", ())
-                    .map_err(|error| error.to_string());
-            }
-        }
-    })
-    .await
+) -> Result<(), ChatError> {
+    chat_service::send(message, &chat_session, &pool, make_callback(app)).await
 }
 
 #[tauri::command]
-pub async fn cancel_token(token: State<'_, Mutex<CancelState>>) -> Result<(), String> {
-    chat_service::cancel_token(&*token).await
+pub async fn resend_message(
+    app: AppHandle,
+    chat_session: State<'_, Mutex<ChatSession>>,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<(), ChatError> {
+    chat_service::resend(&chat_session, &pool, make_callback(app)).await
 }
 
 #[tauri::command]
 pub async fn edit_message(
     app: AppHandle,
-    message_arr: State<'_, Mutex<ChatHistory>>,
-    message: String,
+    chat_session: State<'_, Mutex<ChatSession>>,
+    pool: State<'_, std::sync::Mutex<Connection>>,
     index: usize,
-) -> Result<(), String> {
-    let updated_messages = chat_service::edit_message(&*message_arr, message, index).await?;
-    app.emit("update_messages", updated_messages)
-        .map_err(|error| error.to_string())?;
+    message: String,
+) -> Result<(), ChatError> {
+    chat_service::edit(index, message, &chat_session, &pool, make_callback(app)).await
+}
 
-    Ok(())
+#[tauri::command]
+pub async fn load_chat(
+    id: u32,
+    chat_session: State<'_, Mutex<ChatSession>>,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<SessionSnapshot, ChatError> {
+    chat_service::load_chat(id, &chat_session, &pool).await
+}
+
+#[tauri::command]
+pub async fn new_chat(
+    chat_session: State<'_, Mutex<ChatSession>>,
+) -> Result<SessionSnapshot, ChatError> {
+    Ok(chat_service::new_chat(&chat_session).await)
+}
+
+#[tauri::command]
+pub async fn delete_history(
+    id: u32,
+    chat_session: State<'_, Mutex<ChatSession>>,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<(), ChatError> {
+    chat_service::delete_chat(id, &chat_session, &pool).await
+}
+
+#[tauri::command]
+pub async fn cancel_generation(
+    chat_session: State<'_, Mutex<ChatSession>>,
+) -> Result<(), ChatError> {
+    chat_service::cancel_generation(&chat_session).await
+}
+
+#[tauri::command]
+pub async fn get_session(
+    chat_session: State<'_, Mutex<ChatSession>>,
+) -> Result<SessionSnapshot, ChatError> {
+    Ok(chat_service::get_session(&chat_session).await)
 }
 
 #[tauri::command]
 pub fn get_history(
     pool: State<'_, std::sync::Mutex<Connection>>,
-) -> Result<Vec<GetHistory>, String> {
-    chat_service::get_history(&*pool)
-}
-
-#[tauri::command]
-pub async fn get_messages(
-    pool: State<'_, std::sync::Mutex<Connection>>,
-    app: AppHandle,
-    message_arr: State<'_, Mutex<ChatHistory>>,
-    id: i32,
-) -> Result<(), String> {
-    let fetched_messages = chat_service::get_messages(&*pool, &*message_arr, id).await?;
-
-    app.emit("update_messages", fetched_messages)
-        .map_err(|error| error.to_string())?;
-
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn delete_history (id: u32, pool: State<'_, std::sync::Mutex<Connection>>,) -> Result<(), String> {
-    let conn = pool.lock().map_err(|error| error.to_string())?;
-
-    conn.execute("DELETE FROM history WHERE id = ?1", [id]).map_err(|error| error.to_string())?;
-
-    return Ok(());
-}
-
-#[tauri::command]
-pub async fn recend_message (
-    app: AppHandle,
-    message: String,
-    message_arr: State<'_, Mutex<ChatHistory>>,
-    cancel_state: State<'_, Mutex<CancelState>>,
-    id: Option<u32>,
-    pool: State<'_, std::sync::Mutex<Connection>>,
-) -> Result<(), String> {
-    let id = id.ok_or_else(|| "need id".to_string())?;
-    recend_handel(id, &pool, &message_arr).await?;
-
-    send_message(app, message, message_arr, cancel_state, Some(id), pool).await?;
-    return Ok(());
+) -> Result<Vec<GetHistory>, ChatError> {
+    repository::get_history(&*pool)
 }

@@ -1,23 +1,43 @@
 export type Message = {
   role: "user" | "assistant";
   content: string;
-  thinking?: string;
+  thinking?: string | null;
 };
+
+export type SessionSnapshot = {
+  history_id: number | null;
+  messages: Message[];
+  generating: boolean;
+};
+
+export type ChatEvent =
+  | {
+      type: "Snapshot";
+      history_id?: number | null;
+      messages: Message[];
+      generating?: boolean;
+    }
+  | {
+      type: "ContentDelta";
+      content: string;
+    }
+  | {
+      type: "ThinkingDelta";
+      thinking: string;
+    }
+  | {
+      type: "GenerationFinished";
+      reason: string;
+    }
+  | {
+      type: "Error";
+      message: string;
+    }
+  | {
+      type: "HistoryChanged";
+    };
 
 export type Conversation = {
   id: number;
   title: string;
 };
-
-export type Invoke = {
-  sendMessage: "send_message",
-  cancelToken: "cancel_token",
-  editMessage: "edit_message",
-}
-
-export type Listen = {
-  updateMessage: "update_message",
-  updateMessageContent: "update_message_content",
-  updateMessages: "update_messages",
-  emitDone: "emit_done",
-}

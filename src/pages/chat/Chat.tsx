@@ -1,204 +1,105 @@
-import ReactMarkdown from "react-markdown";
-import useMessages from "../../store/messages";
-import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import useKeyboardShortcut from "../../hooks/useKeyboardShortcut";
-import EditInput from "../../components/EditInput";
-import { useNavigate } from "react-router";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import MessageView from "../../components/MessageView";
+import { useMessages } from "../../store/messages";
+import { useUI } from "../../store/ui";
 
-const ThinkingBlock = ({ thinking, hasContent }: { thinking: string; hasContent: boolean }) => {
-  const [open, setOpen] = useState(true);
-
-  useEffect(() => {
-    if (hasContent) setOpen(false);
-  }, [hasContent]);
-
-  return (
-    <div className="mb-3">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 text-xs tracking-widest opacity-50 hover:opacity-80 transition-opacity"
-      >
-        <span
-          className={`inline-block transition-transform duration-200 ${open ? "rotate-90" : "rotate-0"}`}
-        >
-          ▶
-        </span>
-        {hasContent ? "Thought" : "Thinking…"}
-      </button>
-
-      {open && (
-        <div className="mt-2 pl-4 border-l border-current opacity-40 text-sm leading-relaxed whitespace-pre-wrap">
-          {thinking}
-        </div>
-      )}
-    </div>
-  );
-};
+const SCROLL_THRESHOLD = 40;
 
 const Chat = () => {
-  const messages = useMessages().messages;
-  const isLoading = useMessages().isLoading;
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const setLoading = useMessages().setIsloading;
-  const currentId = useMessages().currentId;
-  const [editIndex, setEditIndex] = useState(0);
-  const [editMode, setEditMode] = useState(false);
-  const [editingMessage, setEditingMessage] = useState("");
-  const navigate = useNavigate();
+  const messages = useMessages((state) => state.messages);
+  const isGenerating = useMessages((state) => state.isGenerating);
 
+  const mode = useUI((state) => state.mode);
+  const overlay = useUI((state) => state.overlay);
+  const editIndex = useUI((state) => state.editIndex);
+  const scrollPinSignal = useUI((state) => state.scrollPinSignal);
+
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const messageRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  const setMessageRef = useCallback((index: number, el: HTMLDivElement | null) => {
+    messageRefs.current[index] = el;
+  }, []);
+
+  // Focus scroller when active layer returns to idle so native keys (PageUp/Down/Home/End/Arrows) scroll
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    if (mode === "idle" && overlay === null) {
+      scrollerRef.current?.focus({ preventScroll: true });
+    }
+  }, [mode, overlay]);
+
+  // Handle scroll events to detect if user is near bottom
+  const handleScroll = () => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isAtBottomRef.current = distanceToBottom <= SCROLL_THRESHOLD;
+  };
+
+  // Auto-scroll on messages change if pinned to bottom
+  useLayoutEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    if (isAtBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages]);
 
-  useKeyboardShortcut("ctrl+s",() => {
-    cancelMessage();
-    setLoading(false);
-  })
+  // ResizeObserver on the scroller: re-pin when InputBar opens, closes, or grows
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
 
-  useKeyboardShortcut("ctrl+e",() => {
-    let nextEditIndex
-    if(messages[messages.length - 1].role === 'user') {
-      nextEditIndex = messages.length - 1;
-    } else {
-      nextEditIndex = messages.length - 2;
+    const observer = new ResizeObserver(() => {
+      if (isAtBottomRef.current) {
+        el.scrollTop = el.scrollHeight;
+      }
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // Force-pin on send, resend, or edit commit
+  useEffect(() => {
+    if (scrollPinSignal > 0) {
+      isAtBottomRef.current = true;
+      const el = scrollerRef.current;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+      }
     }
-    if (nextEditIndex < 0) {
-      return;
+  }, [scrollPinSignal]);
+
+  // Edit mode: scroll target message into view with block: "nearest"
+  useEffect(() => {
+    if (mode === "edit" && editIndex !== null) {
+      const targetEl = messageRefs.current[editIndex];
+      targetEl?.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
-
-    setEditIndex(nextEditIndex);
-    setEditingMessage(messages[nextEditIndex].content);
-    setEditMode(true);
-  })
-
-  useKeyboardShortcut("ctrl+ArrowUp",() => {
-    if (!editMode || editIndex - 2 < 0) {
-      return;
-    }
-
-    const nextEditIndex = editIndex - 2;
-    setEditIndex(nextEditIndex);
-    setEditingMessage(messages[nextEditIndex].content);
-  })
-
-  useKeyboardShortcut("ctrl+ArrowDown",() => {
-    if (!editMode || editIndex + 2 > messages.length - 2) {
-      return;
-    }
-
-    const nextEditIndex = editIndex + 2;
-    setEditIndex(nextEditIndex);
-    setEditingMessage(messages[nextEditIndex].content);
-  })
-
-  useKeyboardShortcut("Enter",() => {
-    if (!editMode) {
-      return;
-    }
-
-    setEditMode(false);
-    setEditIndex(messages.length - 1);
-    editMessage();
-  })
-
-    useKeyboardShortcut("ctrl+n",() => {
-      navigate('/');
-    })
-
-  const cancelMessage = async () => {
-    try {
-      await invoke("cancel_token");
-    } catch (error) {
-      console.log(
-        error instanceof Error ? error.message : `Something went wrong ${error}.`,
-      );
-    }
-  };
-
-  const editMessage = async () => {
-    const payload = { message: editingMessage, index: editIndex };
-
-    try {
-      await invoke("edit_message", payload);
-      await invoke("send_message", { message: editingMessage });
-    } catch (error) {
-      console.log(
-        error instanceof Error ? error.message : `Something went wrong ${error}.`,
-      );
-    }
-  };
-
-  const resendMessage = async (message: string) => {
-    if (currentId === null) return;
-
-    try {
-      await invoke("recend_message", { message, id: currentId });
-    } catch (error) {
-      setLoading(false);
-      console.log(
-        error instanceof Error ? error.message : `Something went wrong ${error}.`,
-      );
-    }
-  };
+  }, [mode, editIndex]);
 
   return (
-    <div className="h-screen w-[60vw] absolute left-1/2 -translate-x-1/2 flex flex-col gap-10 overflow-y-scroll no-scrollbar pt-20">
-      {messages.map((message, i) => {
-        const isLast = i === messages.length - 1;
-
-        if (message.role === 'user') {
-          return (
-            <div key={i} className="flex justify-end text-right">
-              <p className="w-[70%]">{message.content}</p>
-            </div>
-          );
-        }
-
-        const isProcessing = isLoading && isLast && !message.content && !message.thinking;
-        const hasThinking  = !!message.thinking;
-        const hasContent   = !!message.content;
-
-        return (
-          <div key={i}>
-            {isProcessing && (
-              <span className="opacity-40 text-sm tracking-widest animate-pulse">
-                Processing…
-              </span>
-            )}
-
-            {hasThinking && (
-              <ThinkingBlock
-                thinking={message.thinking!}
-                hasContent={hasContent}
-              />
-            )}
-
-            {hasContent && (
-              <ReactMarkdown>{message.content}</ReactMarkdown>
-            )}
-
-            {currentId !== null &&
-              !isLoading &&
-              isLast &&
-              i > 0 &&
-              messages[i - 1].role === "user" && (
-                <button
-                  onClick={() => resendMessage(messages[i - 1].content)}
-                  className="mt-3 text-xs tracking-widest opacity-40 hover:opacity-80 transition-opacity"
-                >
-                  Resend
-                </button>
-              )}
-          </div>
-        );
-      })}
-      <div ref={bottomRef} className="h-10"></div>
-      <EditInput
-        editingMessage={editingMessage}
-        setEditingMessage={setEditingMessage}
-        editMode={editMode}
-      />
+    <div
+      ref={scrollerRef}
+      tabIndex={-1}
+      onScroll={handleScroll}
+      className="flex-1 min-h-0 w-full overflow-y-auto no-scrollbar outline-none"
+    >
+      <div className="mx-auto w-(--column) flex flex-col gap-10 py-10">
+        {messages.map((message, i) => (
+          <MessageView
+            key={i}
+            message={message}
+            index={i}
+            isLast={i === messages.length - 1}
+            isGenerating={isGenerating}
+            isEditingThis={mode === "edit" && editIndex === i}
+            setMessageRef={setMessageRef}
+          />
+        ))}
+      </div>
     </div>
   );
 };
