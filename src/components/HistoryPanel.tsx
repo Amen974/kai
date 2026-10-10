@@ -26,12 +26,10 @@ const HistoryPanel = () => {
     }
   };
 
-  // Fetch only on mount and on historyVersion change
   useEffect(() => {
     fetchHistory();
   }, [historyVersion]);
 
-  // When history panel opens, initialize selection at current historyId and disarm deletion
   useEffect(() => {
     if (isOpen) {
       setArmedDeleteId(null);
@@ -42,7 +40,6 @@ const HistoryPanel = () => {
     }
   }, [isOpen]);
 
-  // Scroll selected item into view
   useEffect(() => {
     if (isOpen && itemRefs.current[selectedIndex]) {
       itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
@@ -55,6 +52,7 @@ const HistoryPanel = () => {
       console.debug("[load_chat]", snapshot.messages.map((m) => !!m.thinking));
       dispatch({ type: "Snapshot", ...snapshot });
       useUI.getState().forceScrollPin();
+      useUI.setState({ thinkingIndex: null });
       setOverlay(null);
     } catch (error) {
       console.error("Failed to load chat:", error);
@@ -79,7 +77,6 @@ const HistoryPanel = () => {
     }
   };
 
-  // Keyboard navigation when history is open
   useEffect(() => {
     if (!isOpen) return;
 
@@ -106,11 +103,9 @@ const HistoryPanel = () => {
         if (!selected) return;
 
         if (armedDeleteId === selected.id) {
-          // Second Delete confirms
           handleDelete(selected.id);
           setArmedDeleteId(null);
         } else {
-          // First Delete arms
           setArmedDeleteId(selected.id);
         }
       } else if (
@@ -120,7 +115,6 @@ const HistoryPanel = () => {
         e.key !== "Shift" &&
         e.key !== "Escape"
       ) {
-        // Any other key disarms
         setArmedDeleteId(null);
       }
     };
@@ -139,13 +133,6 @@ const HistoryPanel = () => {
       />
 
       <div className="panel-card relative w-[50vw] max-h-[60vh] flex flex-col z-layer-modal overflow-hidden">
-        <div className="px-6 py-4 flex items-center justify-between border-b">
-          <p className="text-xs tracking-widest uppercase">History</p>
-          <span className="text-[11px] opacity-40">
-            ↑/↓ select · Enter load · Del delete
-          </span>
-        </div>
-
         <ul
           ref={listRef}
           role="listbox"

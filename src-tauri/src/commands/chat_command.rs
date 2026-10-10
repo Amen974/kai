@@ -117,5 +117,5 @@ pub async fn get_session(
 pub fn get_history(
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<Vec<GetHistory>, ChatError> {
-    repository::get_history(&*pool)
+    repository::get_history(&pool)
 }

@@ -3,17 +3,18 @@ import { useUI } from "../store/ui";
 interface ThinkingBlockProps {
   thinking: string;
   hasContent: boolean;
+  index: number;
 }
 
-export const ThinkingBlock = ({ thinking, hasContent }: ThinkingBlockProps) => {
-  const showThinking = useUI((state) => state.showThinking);
+export const ThinkingBlock = ({ thinking, hasContent, index }: ThinkingBlockProps) => {
+  const isSelected = useUI((state) => state.thinkingIndex === index);
   const toggleThinking = useUI((state) => state.toggleThinking);
-  const open = showThinking || !hasContent;
+  const open = isSelected || !hasContent;
 
   return (
     <div className="mb-3">
       <button
-        onClick={toggleThinking}
+        onClick={() => toggleThinking(index)}
         type="button"
         className="flex items-center gap-2 text-xs tracking-widest opacity-50 hover:opacity-80 transition-opacity cursor-pointer select-none"
       >

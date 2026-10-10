@@ -5,7 +5,6 @@ import { SessionSnapshot } from "./types";
 export interface KeyBinding {
   keys: string;
   layers: UILayer[];
-  label: string;
   run: () => void | Promise<void>;
 }
 
@@ -13,7 +12,6 @@ export const keymap: KeyBinding[] = [
   {
     keys: "ctrl+m",
     layers: ["idle"],
-    label: "Compose message",
     run: () => {
       const { isGenerating } = useMessages.getState();
       if (isGenerating) return;
@@ -23,7 +21,6 @@ export const keymap: KeyBinding[] = [
   {
     keys: "ctrl+e",
     layers: ["idle"],
-    label: "Edit last user message",
     run: () => {
       const { isGenerating, messages } = useMessages.getState();
       if (isGenerating || messages.length === 0) return;
@@ -43,7 +40,6 @@ export const keymap: KeyBinding[] = [
   {
     keys: "ctrl+ArrowUp",
     layers: ["edit"],
-    label: "Previous user message",
     run: () => {
       const { editIndex } = useUI.getState();
       const { messages } = useMessages.getState();
@@ -60,7 +56,6 @@ export const keymap: KeyBinding[] = [
   {
     keys: "ctrl+ArrowDown",
     layers: ["edit"],
-    label: "Next user message",
     run: () => {
       const { editIndex } = useUI.getState();
       const { messages } = useMessages.getState();
@@ -76,8 +71,7 @@ export const keymap: KeyBinding[] = [
   },
   {
     keys: "Escape",
-    layers: ["compose", "edit", "history", "help"],
-    label: "Close topmost layer",
+    layers: ["compose", "edit", "history"],
     run: () => {
       useMessages.getState().setError(null);
       useUI.getState().closeTopmost();
@@ -86,7 +80,6 @@ export const keymap: KeyBinding[] = [
   {
     keys: "ctrl+r",
     layers: ["idle"],
-    label: "Resend",
     run: async () => {
       const { isGenerating } = useMessages.getState();
       if (isGenerating) return;
@@ -101,7 +94,6 @@ export const keymap: KeyBinding[] = [
   {
     keys: "ctrl+s",
     layers: ["idle", "compose", "edit"],
-    label: "Cancel generation",
     run: async () => {
       const { isGenerating } = useMessages.getState();
       if (!isGenerating) return;
@@ -115,10 +107,9 @@ export const keymap: KeyBinding[] = [
   {
     keys: "ctrl+n",
     layers: ["idle"],
-    label: "New chat",
     run: async () => {
-      useUI.getState().setMode("idle");
-      useUI.getState().setOverlay(null);
+      useUI.getState().closeTopmost();
+      useUI.setState({ thinkingIndex: null });
       try {
         const snapshot = await run<SessionSnapshot>("new_chat");
         useMessages.getState().dispatch({ type: "Snapshot", ...snapshot });
@@ -130,34 +121,12 @@ export const keymap: KeyBinding[] = [
   {
     keys: "ctrl+h",
     layers: ["idle", "history"],
-    label: "Toggle history",
     run: () => {
       const { overlay, mode } = useUI.getState();
       if (overlay === "history") {
         useUI.getState().setOverlay(null);
       } else if (mode === "idle" && overlay === null) {
         useUI.getState().setOverlay("history");
-      }
-    },
-  },
-  {
-    keys: "ctrl+t",
-    layers: ["idle"],
-    label: "Toggle thinking",
-    run: () => {
-      useUI.getState().toggleThinking();
-    },
-  },
-  {
-    keys: "ctrl+/",
-    layers: ["idle", "help"],
-    label: "Toggle shortcut help",
-    run: () => {
-      const { overlay, mode } = useUI.getState();
-      if (overlay === "help") {
-        useUI.getState().setOverlay(null);
-      } else if (mode === "idle" && overlay === null) {
-        useUI.getState().setOverlay("help");
       }
     },
   },

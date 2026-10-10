@@ -1,7 +1,7 @@
 const SideLabels = () => (
   <div className="pointer-events-none select-none z-layer-decor" aria-hidden="true">
     <div className="light absolute bottom-[2vh] left-[2vw] flex items-center font-medium [writing-mode:vertical-rl] [text-orientation:upright] pointer-events-none">
-      <span className="mb-3 block h-7 w-[0.05rem] bg-(--color-bg)" />
+      <span className={`mb-3 block h-7 w-[0.05rem] bg-(--color-bg)`} />
       <p className="text-xs tracking-[0.3rem]">四〇〇</p>
     </div>
 

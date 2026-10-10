@@ -8,7 +8,6 @@ export interface ChatState {
   isGenerating: boolean;
   error: string | null;
   historyVersion: number;
-  seq: number;
   dispatch: (event: ChatEvent) => void;
   setError: (error: string | null) => void;
 }
@@ -18,36 +17,11 @@ export function appendToAssistant(
   field: "content" | "thinking",
   text: string
 ): Message[] {
-  if (messages.length === 0) {
-    return [
-      {
-        role: "assistant",
-        content: field === "content" ? text : "",
-        thinking: field === "thinking" ? text : null,
-      },
-    ];
-  }
-
   const lastIndex = messages.length - 1;
-  const lastMessage = messages[lastIndex];
-
-  if (lastMessage.role === "assistant") {
-    const updated = [...messages];
-    updated[lastIndex] = {
-      ...lastMessage,
-      [field]: (lastMessage[field] ?? "") + text,
-    };
-    return updated;
-  }
-
-  return [
-    ...messages,
-    {
-      role: "assistant",
-      content: field === "content" ? text : "",
-      thinking: field === "thinking" ? text : null,
-    },
-  ];
+  const last = messages[lastIndex];
+  const updated = [...messages];
+  updated[lastIndex] = { ...last, [field]: (last[field] ?? "") + text };
+  return updated;
 }
 
 export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatState> {
@@ -56,7 +30,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatSta
       const updates: Partial<ChatState> = {
         messages: event.messages,
         error: null,
-        seq: state.seq + 1,
       };
       if (event.history_id !== undefined) {
         updates.historyId = event.history_id;
@@ -71,7 +44,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatSta
       return {
         messages: appendToAssistant(state.messages, "content", event.content),
         isGenerating: true,
-        seq: state.seq + 1,
       };
     }
 
@@ -79,7 +51,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatSta
       return {
         messages: appendToAssistant(state.messages, "thinking", event.thinking),
         isGenerating: true,
-        seq: state.seq + 1,
       };
     }
 
@@ -122,15 +93,7 @@ export async function run<T = void>(
   try {
     return await invoke<T>(cmd, args);
   } catch (err: unknown) {
-    const message =
-      typeof err === "string"
-        ? err
-        : err instanceof Error
-        ? err.message
-        : typeof err === "object" && err !== null && "message" in err
-        ? String((err as { message: unknown }).message)
-        : String(err);
-    useMessages.getState().setError(message);
+    useMessages.getState().setError(String(err));
     throw err;
   }
 }

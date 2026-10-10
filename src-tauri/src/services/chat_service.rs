@@ -156,18 +156,18 @@ async fn persist_assistant(
     session_mutex: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
 ) -> Result<(), ChatError> {
-    let (history_id, content) = {
+    let (history_id, content, thinking) = {
         let state = session_mutex.lock().await;
-        let content = state
-            .messages
-            .last()
+        let last = state.messages.last();
+        let content = last
             .map(|m| m.content.clone())
             .unwrap_or_default();
-        (state.history_id, content)
+        let thinking = last.and_then(|m| m.thinking.clone());
+        (state.history_id, content, thinking)
     };
 
     if let Some(hid) = history_id {
-        insert_message(pool, hid, Assistant.as_str(), &content)?;
+        insert_message(pool, hid, Assistant.as_str(), &content, thinking.as_deref())?;
         touch_history(pool, hid)?;
     }
 
@@ -346,21 +346,16 @@ async fn record_user_message(
 
     let mut state = session_mutex.lock().await;
 
-    let (snapshot, is_new) = {
-        state.push_user(content.clone());
-        (snapshot_event(&state), state.history_id.is_none())
-    };
-    update_callback(snapshot);
+    let is_new = state.history_id.is_none();
+    if is_new {
+        state.history_id = Some(create_history(pool)?);
+    }
+    let history_id = state.history_id.expect("set above");
 
-    let history_id = if is_new {
-        let id = create_history(pool)?;
-        state.history_id = Some(id);
-        id
-    } else {
-        state.history_id.expect("history_id must be Some here")
-    };
+    state.push_user(content.clone());
+    update_callback(snapshot_event(&state));
 
-    insert_message(pool, history_id, User.as_str(), &content)?;
+    insert_message(pool, history_id, User.as_str(), &content, None)?;
     touch_history(pool, history_id)?;
 
     Ok(is_new)

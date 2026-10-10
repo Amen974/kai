@@ -22,14 +22,12 @@ const Chat = () => {
     messageRefs.current[index] = el;
   }, []);
 
-  // Focus scroller when active layer returns to idle so native keys (PageUp/Down/Home/End/Arrows) scroll
   useEffect(() => {
     if (mode === "idle" && overlay === null) {
       scrollerRef.current?.focus({ preventScroll: true });
     }
   }, [mode, overlay]);
 
-  // Handle scroll events to detect if user is near bottom
   const handleScroll = () => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -37,7 +35,6 @@ const Chat = () => {
     isAtBottomRef.current = distanceToBottom <= SCROLL_THRESHOLD;
   };
 
-  // Auto-scroll on messages change if pinned to bottom
   useLayoutEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -46,7 +43,6 @@ const Chat = () => {
     }
   }, [messages]);
 
-  // ResizeObserver on the scroller: re-pin when InputBar opens, closes, or grows
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
@@ -61,7 +57,6 @@ const Chat = () => {
     return () => observer.disconnect();
   }, []);
 
-  // Force-pin on send, resend, or edit commit
   useEffect(() => {
     if (scrollPinSignal > 0) {
       isAtBottomRef.current = true;
@@ -72,7 +67,6 @@ const Chat = () => {
     }
   }, [scrollPinSignal]);
 
-  // Edit mode: scroll target message into view with block: "nearest"
   useEffect(() => {
     if (mode === "edit" && editIndex !== null) {
       const targetEl = messageRefs.current[editIndex];

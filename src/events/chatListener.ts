@@ -1,6 +1,6 @@
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { ChatEvent, Message, SessionSnapshot } from "../types";
-import { run, useMessages } from "../store/messages";
+import { ChatEvent, Message } from "../types";
+import { useMessages } from "../store/messages";
 
 export async function setupChatEventListener(): Promise<() => void> {
   const unlistens: UnlistenFn[] = [];
@@ -59,25 +59,6 @@ export async function setupChatEventListener(): Promise<() => void> {
     dispatch({
       type: "HistoryChanged",
     });
-
-    if (useMessages.getState().historyId === null) {
-      const seqBefore = useMessages.getState().seq;
-      run<SessionSnapshot>("get_session")
-        .then((session) => {
-          if (useMessages.getState().seq !== seqBefore) {
-            console.debug("[resync] discarded stale session response (seq changed)");
-            return;
-          }
-          console.debug("[resync]", session.messages.map((m) => !!m.thinking));
-          dispatch({
-            type: "Snapshot",
-            ...session,
-          });
-        })
-        .catch((err) => {
-          console.error("Failed to resync session after history_changed:", err);
-        });
-    }
   });
   unlistens.push(unlistenHistory);
 

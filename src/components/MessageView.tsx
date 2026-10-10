@@ -56,6 +56,7 @@ export const MessageView = React.memo(function MessageView({
         <ThinkingBlock
           thinking={message.thinking!}
           hasContent={hasContent}
+          index={index}
         />
       )}
 

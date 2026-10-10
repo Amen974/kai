@@ -59,15 +59,17 @@ pub fn insert_message(
     history_id: u32,
     role: &str,
     content: &str,
+    thinking: Option<&str>,
 ) -> Result<(), ChatError> {
     let now = chrono::Utc::now().to_rfc3339();
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
     conn.execute(
-        "INSERT INTO messages (history_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
-        (&history_id, role, content, &now),
+        "INSERT INTO messages (history_id, role, content, thinking, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        (history_id, role, content, thinking, &now),
     )?;
     Ok(())
 }
+
 
 pub fn truncate_messages(
     pool: &std::sync::Mutex<Connection>,
@@ -113,14 +115,14 @@ pub fn load_messages(
 ) -> Result<Vec<ChatMessage>, ChatError> {
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
     let mut stmt =
-        conn.prepare("SELECT role, content FROM messages WHERE history_id = ?1 ORDER BY id")?;
+        conn.prepare("SELECT role, content, thinking FROM messages WHERE history_id = ?1 ORDER BY id")?;
     let rows = stmt.query_map([history_id], |row| {
         let role_str: String = row.get(0)?;
         let role = Role::from_str(&role_str).ok_or(rusqlite::Error::InvalidQuery)?;
         Ok(ChatMessage {
             role,
             content: row.get(1)?,
-            thinking: None,
+            thinking: row.get(2)?,
         })
     })?;
     Ok(rows.collect::<Result<Vec<_>, _>>()?)

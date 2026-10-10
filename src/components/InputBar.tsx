@@ -106,10 +106,6 @@ const InputBar = () => {
           </div>
         )}
 
-        <div className="text-[11px] tracking-widest uppercase opacity-40 mb-1 px-1">
-          {isEdit ? "Edit · Enter save · Esc cancel" : "Enter send"}
-        </div>
-
         <div className="panel-card px-6 py-1 min-h-[9vh] flex items-center w-full">
           <textarea
             ref={textareaRef}

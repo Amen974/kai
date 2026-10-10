@@ -1,8 +1,8 @@
 import { create } from "zustand";
 
 export type UIMode = "idle" | "compose" | "edit";
-export type UIOverlay = "history" | "help" | null;
-export type UILayer = "history" | "help" | "compose" | "edit" | "idle";
+export type UIOverlay = "history" | null;
+export type UILayer = "history" | "compose" | "edit" | "idle";
 
 export interface UIState {
   mode: UIMode;
@@ -10,7 +10,7 @@ export interface UIState {
   editIndex: number | null;
   draft: string;
   editDraft: string;
-  showThinking: boolean;
+  thinkingIndex: number | null;
   scrollPinSignal: number;
   setMode: (mode: UIMode) => void;
   setOverlay: (overlay: UIOverlay) => void;
@@ -18,12 +18,12 @@ export interface UIState {
   startEdit: (index: number, content: string) => void;
   setDraft: (draft: string) => void;
   setEditDraft: (editDraft: string) => void;
-  toggleThinking: () => void;
+  toggleThinking: (index: number) => void;
   forceScrollPin: () => void;
   closeTopmost: () => void;
 }
 
-export const useUI = create<UIState>((set, get) => ({
+export const useUI = create<UIState>(set => ({
   mode: "idle",
   overlay: null,
   editIndex: null,
@@ -31,6 +31,7 @@ export const useUI = create<UIState>((set, get) => ({
   editDraft: "",
   showThinking: false,
   scrollPinSignal: 0,
+  thinkingIndex: null,
 
   setMode: (mode) => set({ mode }),
   setOverlay: (overlay) => set({ overlay }),
@@ -52,27 +53,18 @@ export const useUI = create<UIState>((set, get) => ({
   setDraft: (draft) => set({ draft }),
   setEditDraft: (editDraft) => set({ editDraft }),
 
-  toggleThinking: () => set((state) => ({ showThinking: !state.showThinking })),
+  toggleThinking: (index) =>
+    set((state) => ({
+      thinkingIndex: state.thinkingIndex === index ? null : index,
+    })),
 
   forceScrollPin: () => set((state) => ({ scrollPinSignal: state.scrollPinSignal + 1 })),
 
 
   closeTopmost: () => {
-    const { overlay, mode } = get();
-    if (overlay !== null) {
       set({ overlay: null });
-      return;
-    }
-    if (mode === "edit") {
-      // Edit cancels: discard edit draft and index
       set({ mode: "idle", editIndex: null, editDraft: "" });
       return;
-    }
-    if (mode === "compose") {
-      // Compose closes: keep draft in store
-      set({ mode: "idle" });
-      return;
-    }
   },
 }));
 
