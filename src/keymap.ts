@@ -1,6 +1,7 @@
 import { useUI, UILayer, getActiveLayer } from "./store/ui";
 import { useMessages, run } from "./store/messages";
 import { SessionSnapshot } from "./types";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export interface KeyBinding {
   keys: string;
@@ -67,6 +68,24 @@ export const keymap: KeyBinding[] = [
           break;
         }
       }
+    },
+  },
+  {
+    keys: "ctrl+w",
+    layers: ["idle", "compose", "edit", "history"],
+    run: () => getCurrentWindow().close(),
+  },
+  {
+    keys: "ctrl+shift+m",
+    layers: ["idle", "compose", "edit", "history"],
+    run: () => getCurrentWindow().minimize(),
+  },
+  {
+    keys: "F11",
+    layers: ["idle", "compose", "edit", "history"],
+    run: async () => {
+      const win = getCurrentWindow();
+      await win.setFullscreen(!(await win.isFullscreen()));
     },
   },
   {

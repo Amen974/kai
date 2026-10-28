@@ -13,7 +13,8 @@
     "windows": [
       {
         "title": "kai",
-        "width": 800,
+        "decorations": false,
+        "width": 1200,
         "height": 600
       }
     ],
