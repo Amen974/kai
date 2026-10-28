@@ -81,7 +81,6 @@ export const useMessages = create<ChatState>((set) => ({
   isGenerating: false,
   error: null,
   historyVersion: 0,
-  seq: 0,
   dispatch: (event: ChatEvent) => set((state) => chatReducer(state, event)),
   setError: (error: string | null) => set({ error }),
 }));

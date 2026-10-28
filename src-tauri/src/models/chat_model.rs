@@ -10,6 +10,7 @@ pub struct ChatMessage {
 
 #[derive(serde::Serialize)]
 #[derive(Clone)]
+#[derive(PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
     User,
@@ -87,4 +88,4 @@ pub struct SessionSnapshot {
     pub history_id: Option<u32>,
     pub messages: Vec<ChatMessage>,
     pub generating: bool,
-}
+}

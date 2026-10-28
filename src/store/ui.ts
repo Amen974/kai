@@ -29,7 +29,6 @@ export const useUI = create<UIState>(set => ({
   editIndex: null,
   draft: "",
   editDraft: "",
-  showThinking: false,
   scrollPinSignal: 0,
   thinkingIndex: null,
 

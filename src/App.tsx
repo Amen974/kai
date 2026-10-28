@@ -14,6 +14,8 @@ function App() {
   const dispatch = useMessages((state) => state.dispatch);
   const messages = useMessages((state) => state.messages);
 
+  const isHome = messages.length === 0;
+
   useEffect(() => {
     window.addEventListener("keydown", handleKeydown);
     return () => {
@@ -59,8 +61,8 @@ function App() {
     <main className="h-screen w-full flex flex-col overflow-hidden relative">
       <SideLabels />
       <HistoryPanel />
-      {messages.length ? <Chat /> : <Home />}
-      <InputBar />
+      {isHome ? <Home /> : <Chat />}
+      <InputBar isHome={isHome} />
     </main>
   );
 }

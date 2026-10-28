@@ -4,7 +4,11 @@ import { useUI } from "../store/ui";
 
 const MAX_HEIGHT = 200;
 
-const InputBar = () => {
+type InputBarProps = {
+  isHome: boolean;
+};
+
+const InputBar = ({ isHome }: InputBarProps) => {
   const mode = useUI((state) => state.mode);
   const draft = useUI((state) => state.draft);
   const editDraft = useUI((state) => state.editDraft);
@@ -98,7 +102,11 @@ const InputBar = () => {
   }
 
   return (
-    <div className="flex-none w-full pb-6 pt-2">
+    <div className={
+      isHome
+      ? "absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full"
+      : "flex-none w-full pb-6 pt-2"
+    }>
       <div className="mx-auto w-(--column) flex flex-col">
         {error && (
           <div className="w-full mb-2 text-xs tracking-wider text-(--color-error) px-1 truncate">

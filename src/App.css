@@ -13,6 +13,17 @@
   --color-shadow: rgba(43, 42, 40, 0.12);
   --color-error: #a83232;
 
+  /* Muted code palette to match the paper-and-ink app vibe */
+  --color-code-bg: rgba(43, 42, 40, 0.06);
+  --color-code-text: #3a352f;
+  --color-code-green: #4f6354;
+  --color-code-brown: #745f4e;
+  --color-code-olive: #5f6251;
+  --color-code-gold: #7a5c3c;
+  --color-code-muted: #6b655d;
+  --color-code-mauve: #6b5867;
+  --color-code-ink: #2b2a28;
+
   --z-decor: 10;
   --z-input: 20;
   --z-modal: 40;
@@ -171,29 +182,62 @@ body {
 
 .markdown-content code {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 0.875em;
-  background-color: rgba(43, 42, 40, 0.08);
-  padding: 0.15em 0.35em;
-  border-radius: 0.2rem;
+  font-size: 0.85em;
+  color: var(--color-code-text);
+  background-color: var(--color-code-bg);
+  padding: 0.1em 0.35em;
+  border-radius: 0.125rem;
 }
 
 .markdown-content pre {
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.875rem;
-  background-color: rgba(43, 42, 40, 0.05);
+  margin: 0.75rem 0 1rem;
+  padding: 0.875rem 1.125rem;
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  background-color: var(--color-code-bg);
   border: 1px solid var(--color-border);
-  padding: 0.75rem 1rem;
-  border-radius: 0.25rem;
+  border-radius: 0.125rem;
   overflow-x: auto;
-  margin-bottom: 0.75rem;
-  margin-top: 0.5rem;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
 }
 
 .markdown-content pre code {
-  background-color: transparent;
   padding: 0;
   font-size: inherit;
+  color: var(--color-code-ink);
+  background: none;
   border-radius: 0;
+}
+
+/* highlight.js tokens (rehype-highlight emits hljs-*, not Prism's .token) */
+.markdown-content :is(.hljs-keyword, .hljs-selector-tag, .hljs-tag, .hljs-name, .hljs-title, .hljs-section) {
+  color: var(--color-code-brown);
+}
+
+.markdown-content :is(.hljs-string, .hljs-regexp, .hljs-addition) {
+  color: var(--color-code-green);
+}
+
+.markdown-content :is(.hljs-number, .hljs-literal) {
+  color: var(--color-code-gold);
+}
+
+.markdown-content :is(.hljs-attr, .hljs-attribute, .hljs-property, .hljs-variable, .hljs-template-variable) {
+  color: var(--color-code-mauve);
+}
+
+.markdown-content :is(.hljs-built_in, .hljs-type, .hljs-meta, .hljs-symbol, .hljs-bullet) {
+  color: var(--color-code-olive);
+}
+
+.markdown-content :is(.hljs-comment, .hljs-quote, .hljs-doctag) {
+  color: var(--color-code-muted);
+  font-style: italic;
+}
+
+.markdown-content .hljs-deletion {
+  color: var(--color-error);
 }
 
 .markdown-content blockquote {

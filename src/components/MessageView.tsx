@@ -1,7 +1,7 @@
 import React from "react";
-import ReactMarkdown from "react-markdown";
 import { Message } from "../types";
 import ThinkingBlock from "./ThinkingBlock";
+import MarkdownMessage from "./MarkdownMessage";
 
 export interface MessageViewProps {
   message: Message;
@@ -62,7 +62,7 @@ export const MessageView = React.memo(function MessageView({
 
       {hasContent && (
         <div className="markdown-content">
-          <ReactMarkdown>{message.content}</ReactMarkdown>
+          <MarkdownMessage content={message.content} />
         </div>
       )}
     </div>

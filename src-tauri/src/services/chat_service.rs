@@ -314,6 +314,7 @@ async fn generate(
 async fn title_if_missing(
     session_mutex: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
+    message: &String,
     update_callback: &impl Fn(ChatEvent),
 ) {
     let (history_id, content) = {
@@ -327,6 +328,9 @@ async fn title_if_missing(
     };
 
     if let Some(hid) = history_id {
+        let _ = update_title(pool, message, &hid);
+        update_callback(ChatEvent::HistoryChanged);
+
         if let Err(err) = create_title(&content, &hid, pool).await {
             eprintln!("Failed to generate title: {}", err);
         }
@@ -337,7 +341,7 @@ async fn title_if_missing(
 async fn record_user_message(
     session_mutex: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
-    content: String,
+    content: &String,
     update_callback: &impl Fn(ChatEvent),
 ) -> Result<bool, ChatError> {
     if content.trim().is_empty() {
@@ -367,10 +371,10 @@ pub async fn send(
     pool: &std::sync::Mutex<Connection>,
     update_callback: impl Fn(ChatEvent),
 ) -> Result<(), ChatError> {
-    let is_new = record_user_message(session, pool, message, &update_callback).await?;
+    let is_new = record_user_message(session, pool, &message, &update_callback).await?;
     generate(session, pool, &update_callback).await?;
     if is_new {
-        title_if_missing(session, pool, &update_callback).await;
+        title_if_missing(session, pool, &message, &update_callback).await;
     }
     Ok(())
 }
@@ -380,15 +384,17 @@ pub async fn resend(
     pool: &std::sync::Mutex<Connection>,
     update_callback: impl Fn(ChatEvent),
 ) -> Result<(), ChatError> {
-    let history_id = {
+    {
         let mut state = session.lock().await;
-        state.pop_last_assistant()?;
-        state.history_id
-    };
 
-    if let Some(hid) = history_id {
-        delete_last_message(pool, hid)?;
-    }
+        if state.messages[state.messages.len() - 1].role == Assistant {
+            state.pop_last_assistant()?; 
+
+            if let Some(hid) = state.history_id {
+                delete_last_message(pool, hid)?;
+            }
+        }
+    };
 
     generate(session, pool, &update_callback).await
 }

@@ -1,3 +1,4 @@
+import ReactMarkdown from "react-markdown";
 import { useUI } from "../store/ui";
 
 interface ThinkingBlockProps {
@@ -28,7 +29,7 @@ export const ThinkingBlock = ({ thinking, hasContent, index }: ThinkingBlockProp
 
       {open && (
         <div className="mt-2 pl-4 border-l border-current opacity-40 text-sm leading-relaxed whitespace-pre-wrap font-mono">
-          {thinking}
+          <ReactMarkdown>{thinking}</ReactMarkdown>
         </div>
       )}
     </div>
