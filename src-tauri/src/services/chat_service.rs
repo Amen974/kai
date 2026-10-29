@@ -205,13 +205,34 @@ async fn finalize_generation(
         }
 
         StopReason::Cancelled => {
-            let snapshot = {
+            let has_content = {
                 let mut state = session_mutex.lock().await;
                 if let Some(last) = state.messages.last() {
                     if matches!(last.role, Assistant) && last.content.is_empty() {
                         let _ = state.pop_last_assistant();
+                        if let Some(hid) = state.history_id {
+                            delete_last_message(pool, hid)?;
+                        }
+                        false
+                    } else {
+                        true
                     }
+                } else {
+                    false
                 }
+            };
+
+            if has_content {
+                if let Err(err) = persist_assistant(session_mutex, pool).await {
+                    update_callback(ChatEvent::Error {
+                        message: err.to_string(),
+                    });
+                    return Err(err);
+                }
+            }
+
+            let snapshot = {
+                let state = session_mutex.lock().await;
                 snapshot_event(&state)
             };
             update_callback(snapshot);
@@ -222,13 +243,34 @@ async fn finalize_generation(
         }
 
         StopReason::Eof => {
-            let snapshot = {
+            let has_content = {
                 let mut state = session_mutex.lock().await;
                 if let Some(last) = state.messages.last() {
                     if matches!(last.role, Assistant) && last.content.is_empty() {
                         let _ = state.pop_last_assistant();
+                        if let Some(hid) = state.history_id {
+                            delete_last_message(pool, hid)?;
+                        }
+                        false
+                    } else {
+                        true
                     }
+                } else {
+                    false
                 }
+            };
+
+            if has_content {
+                if let Err(err) = persist_assistant(session_mutex, pool).await {
+                    update_callback(ChatEvent::Error {
+                        message: err.to_string(),
+                    });
+                    return Err(err);
+                }
+            }
+
+            let snapshot = {
+                let state = session_mutex.lock().await;
                 snapshot_event(&state)
             };
             update_callback(snapshot);
@@ -267,8 +309,8 @@ async fn generate(
         let (generation_id, token) = state.begin_generation()?;
         state.push_assistant_placeholder();
         let snapshot = snapshot_event(&state);
-        let history = state.messages[..state.messages.len() - 1].to_vec();
-        (generation_id, token, snapshot, history)
+        let request_messages = state.messages[..state.messages.len() - 1].to_vec();
+        (generation_id, token, snapshot, request_messages)
     };
     update_callback(snapshot);
 
@@ -387,11 +429,13 @@ pub async fn resend(
     {
         let mut state = session.lock().await;
 
-        if state.messages[state.messages.len() - 1].role == Assistant {
-            state.pop_last_assistant()?; 
+        if let Some(last) = state.messages.last() {
+            if matches!(last.role, Assistant) {
+                state.pop_last_assistant()?; 
 
-            if let Some(hid) = state.history_id {
-                delete_last_message(pool, hid)?;
+                if let Some(hid) = state.history_id {
+                    delete_last_message(pool, hid)?;
+                }
             }
         }
     };
