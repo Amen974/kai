@@ -2,6 +2,7 @@ import React from "react";
 import { Message } from "../types";
 import ThinkingBlock from "./ThinkingBlock";
 import MarkdownMessage from "./MarkdownMessage";
+import Copy from "./Copy";
 
 export interface MessageViewProps {
   message: Message;
@@ -31,7 +32,8 @@ export const MessageView = React.memo(function MessageView({
     return (
       <div
         ref={setRef}
-        className={`flex justify-end text-right transition-all duration-200 ${
+        onClick={async()=> await navigator.clipboard.writeText(message.content)}
+        className={`flex justify-end text-right transition-all duration-200 cursor-pointer ${
           isEditingThis ? "panel-card p-4 -m-4" : ""
         }`}
       >
@@ -63,6 +65,7 @@ export const MessageView = React.memo(function MessageView({
       {hasContent && (
         <div className="markdown-content">
           <MarkdownMessage content={message.content} />
+          <Copy text={message.content} />
         </div>
       )}
     </div>

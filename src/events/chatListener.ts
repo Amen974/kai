@@ -14,7 +14,6 @@ export async function setupChatEventListener(): Promise<() => void> {
   unlistens.push(unlistenChatEvent);
 
   const unlistenMessages = await listen<Message[]>("update_messages", (event) => {
-    console.debug("[update_messages]", event.payload.map((m) => !!m.thinking));
     dispatch({
       type: "Snapshot",
       messages: event.payload,

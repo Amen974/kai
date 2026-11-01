@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { Conversation } from "../types";
 
 export type UIMode = "idle" | "compose" | "edit";
 export type UIOverlay = "history" | null;
@@ -11,6 +12,9 @@ export interface UIState {
   draft: string;
   editDraft: string;
   thinkingIndex: number | null;
+  historyList: Conversation[];
+  historyIndex: number;
+  historyArmedId: number | null;
   scrollPinSignal: number;
   setMode: (mode: UIMode) => void;
   setOverlay: (overlay: UIOverlay) => void;
@@ -19,6 +23,9 @@ export interface UIState {
   setDraft: (draft: string) => void;
   setEditDraft: (editDraft: string) => void;
   toggleThinking: (index: number) => void;
+  setHistoryList: (list: Conversation[]) => void;
+  setHistoryIndex: (index: number) => void;
+  setHistoryArmedId: (id: number | null) => void;
   forceScrollPin: () => void;
   closeTopmost: () => void;
 }
@@ -31,6 +38,9 @@ export const useUI = create<UIState>(set => ({
   editDraft: "",
   scrollPinSignal: 0,
   thinkingIndex: null,
+  historyList: [],
+  historyIndex: 0,
+  historyArmedId: null,
 
   setMode: (mode) => set({ mode }),
   setOverlay: (overlay) => set({ overlay }),
@@ -57,12 +67,15 @@ export const useUI = create<UIState>(set => ({
       thinkingIndex: state.thinkingIndex === index ? null : index,
     })),
 
+  setHistoryList: (historyList) => set({ historyList }),
+  setHistoryIndex: (historyIndex) => set({ historyIndex }),
+  setHistoryArmedId: (historyArmedId) => set({ historyArmedId }),
+
   forceScrollPin: () => set((state) => ({ scrollPinSignal: state.scrollPinSignal + 1 })),
 
 
   closeTopmost: () => {
-      set({ overlay: null });
-      set({ mode: "idle", editIndex: null, editDraft: "" });
+      set({ overlay: null, mode: "idle", editIndex: null, editDraft: "", historyArmedId: null });
       return;
   },
 }));

@@ -141,15 +141,103 @@ export const keymap: KeyBinding[] = [
     keys: "ctrl+h",
     layers: ["idle", "history"],
     run: () => {
-      const { overlay, mode } = useUI.getState();
+      const { overlay, mode, historyList } = useUI.getState();
       if (overlay === "history") {
         useUI.getState().setOverlay(null);
       } else if (mode === "idle" && overlay === null) {
-        useUI.getState().setOverlay("history");
+        const currentActiveId = useMessages.getState().historyId;
+        const idx = historyList.findIndex((c) => c.id === currentActiveId);
+        useUI.setState({
+          overlay: "history",
+          historyIndex: idx >= 0 ? idx : 0,
+          historyArmedId: null,
+        });
       }
     },
   },
+  {
+    keys: "ArrowUp",
+    layers: ["history"],
+    run: () => {
+      const { historyIndex } = useUI.getState();
+      useUI.setState({
+        historyIndex: Math.max(0, historyIndex - 1),
+        historyArmedId: null,
+      });
+    },
+  },
+  {
+    keys: "ArrowDown",
+    layers: ["history"],
+    run: () => {
+      const { historyIndex, historyList } = useUI.getState();
+      useUI.setState({
+        historyIndex: Math.min(Math.max(0, historyList.length - 1), historyIndex + 1),
+        historyArmedId: null,
+      });
+    },
+  },
+  {
+    keys: "Enter",
+    layers: ["history"],
+    run: async () => {
+      const { historyIndex, historyList, setOverlay } = useUI.getState();
+      const { dispatch } = useMessages.getState();
+      const selected = historyList[historyIndex];
+      if (!selected) return;
+
+      useUI.setState({ historyArmedId: null });
+      try {
+        const snapshot = await run<SessionSnapshot>("load_chat", { id: selected.id });
+        dispatch({ type: "Snapshot", ...snapshot });
+        useUI.getState().forceScrollPin();
+        useUI.setState({ thinkingIndex: null });
+        setOverlay(null);
+      } catch (error) {
+        console.error("Failed to load chat:", error);
+      }
+    },
+  },
+  {
+    keys: "Delete",
+    layers: ["history"],
+    run: handleDeleteHistory,
+  },
+  {
+    keys: "Backspace",
+    layers: ["history"],
+    run: handleDeleteHistory,
+  },
 ];
+
+async function handleDeleteHistory() {
+  const { historyIndex, historyList, historyArmedId } = useUI.getState();
+  const selected = historyList[historyIndex];
+  if (!selected) return;
+
+  if (historyArmedId === selected.id) {
+    try {
+      await run("delete_history", { id: selected.id });
+      const nextList = historyList.filter((conv) => conv.id !== selected.id);
+      const nextIndex = Math.min(historyIndex, Math.max(0, nextList.length - 1));
+      useUI.setState({
+        historyList: nextList,
+        historyIndex: nextIndex,
+        historyArmedId: null,
+      });
+
+      const { historyId, dispatch } = useMessages.getState();
+      if (historyId === selected.id) {
+        const session = await run<SessionSnapshot>("get_session");
+        dispatch({ type: "Snapshot", ...session });
+      }
+    } catch (error) {
+      console.error("Failed to delete history:", error);
+    }
+  } else {
+    useUI.setState({ historyArmedId: selected.id });
+  }
+}
 
 export function handleKeydown(e: KeyboardEvent): boolean {
   if (e.isComposing || e.keyCode === 229) {
@@ -161,6 +249,19 @@ export function handleKeydown(e: KeyboardEvent): boolean {
   }
 
   const activeLayer = getActiveLayer(useUI.getState());
+  if (activeLayer === "history") {
+    if (
+      e.key !== "Control" &&
+      e.key !== "Meta" &&
+      e.key !== "Alt" &&
+      e.key !== "Shift" &&
+      e.key !== "Escape" &&
+      e.key !== "Delete" &&
+      e.key !== "Backspace"
+    ) {
+      useUI.getState().setHistoryArmedId(null);
+    }
+  }
   const hasCtrl = e.ctrlKey || e.metaKey;
   const keyName = e.key;
 

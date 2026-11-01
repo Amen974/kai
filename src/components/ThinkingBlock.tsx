@@ -1,5 +1,5 @@
-import ReactMarkdown from "react-markdown";
 import { useUI } from "../store/ui";
+import MarkdownMessage from "./MarkdownMessage";
 
 interface ThinkingBlockProps {
   thinking: string;
@@ -28,8 +28,8 @@ export const ThinkingBlock = ({ thinking, hasContent, index }: ThinkingBlockProp
       </button>
 
       {open && (
-        <div className="mt-2 pl-4 border-l border-current opacity-40 text-sm leading-relaxed whitespace-pre-wrap font-mono">
-          <ReactMarkdown>{thinking}</ReactMarkdown>
+        <div className="mt-2 pl-4 border-l border-current opacity-40 text-sm leading-relaxed whitespace-pre-wrap font-mono cursor-pointer" onClick={() => toggleThinking(index)}>
+          <MarkdownMessage content={thinking} />
         </div>
       )}
     </div>

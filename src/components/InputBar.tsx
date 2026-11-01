@@ -127,7 +127,7 @@ const InputBar = ({ isHome }: InputBarProps) => {
               }
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 if (isEdit) {
                   handleSaveEdit();

@@ -38,7 +38,6 @@ function App() {
     run<SessionSnapshot>("get_session")
       .then((session) => {
         if (isMounted) {
-          console.debug("[mount]", session.messages.map((m) => !!m.thinking));
           dispatch({
             type: "Snapshot",
             ...session,
