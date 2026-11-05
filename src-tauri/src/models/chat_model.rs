@@ -1,8 +1,16 @@
 use tokio_util::sync::CancellationToken;
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct MessageVariant {
+    pub id: u32,
+    pub branch_id: u32,
+}
+
 #[derive(serde::Serialize)]
 #[derive(Clone)]
 pub struct ChatMessage {
+    pub(crate) id: Option<u32>,
+    pub(crate) parent_message_id: Option<u32>,
     pub(crate) role: Role,
     pub(crate) content: String,
     pub(crate) thinking: Option<String>,

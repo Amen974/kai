@@ -14,7 +14,9 @@ pub fn init(app: &AppHandle) -> Result<Connection, Box<dyn std::error::Error>> {
     let pool = rusqlite::Connection::open(db_path)?;
 
     pool.execute("PRAGMA foreign_keys = ON", [])?;
-    pool.execute("PRAGMA journal_mode = WAL", [])?;
+    pool.query_row("PRAGMA journal_mode = WAL", [], |row| {
+        row.get::<_, String>(0)
+    })?;
 
     pool.execute(
         "CREATE TABLE IF NOT EXISTS historys (

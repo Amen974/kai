@@ -280,6 +280,8 @@ export function handleKeydown(e: KeyboardEvent): boolean {
       keyName.toLowerCase() === targetKey.toLowerCase() ||
       (targetKey === "arrowup" && keyName === "ArrowUp") ||
       (targetKey === "arrowdown" && keyName === "ArrowDown") ||
+      (targetKey === "arrowleft" && keyName === "ArrowLeft") ||
+      (targetKey === "arrowright" && keyName === "ArrowRight") ||
       (targetKey === "/" && (keyName === "/" || keyName === "?"));
 
     if (

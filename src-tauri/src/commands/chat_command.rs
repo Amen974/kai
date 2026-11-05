@@ -7,7 +7,7 @@ use crate::{
     database::repository,
     models::{
         chat_event::ChatEvent,
-        chat_model::{GetHistory, SessionSnapshot},
+        chat_model::{GetHistory, MessageVariant, SessionSnapshot},
         error_model::ChatError,
     },
     services::chat_service,
@@ -104,6 +104,15 @@ pub async fn switch_branch(
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<SessionSnapshot, ChatError> {
     chat_service::switch_branch(branch_id, &chat_session, &pool).await
+}
+
+#[tauri::command]
+pub async fn get_variants(
+    history_id: u32,
+    parent_message_id: Option<u32>,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<Vec<MessageVariant>, ChatError> {
+    repository::get_variants(&pool, history_id, parent_message_id)
 }
 
 #[tauri::command]

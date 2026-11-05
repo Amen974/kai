@@ -184,6 +184,12 @@ async fn persist_assistant(
         )?;
         update_branch_head(pool, branch_id, new_id)?;
         touch_history(pool, hid)?;
+
+        let mut state = session_mutex.lock().await;
+        if let Some(last) = state.messages.last_mut() {
+            last.id = Some(new_id);
+            last.parent_message_id = parent_message_id;
+        }
     }
 
     Ok(())
@@ -436,7 +442,7 @@ async fn record_user_message(
     update_branch_head(pool, branch_id, new_id)?;
     touch_history(pool, history_id)?;
 
-    state.push_user(content.clone());
+    state.push_user(content.clone(), Some(new_id), parent_message_id);
     update_callback(snapshot_event(&state));
 
     Ok((is_new, new_id))

@@ -3,6 +3,8 @@ import { Message } from "../types";
 import ThinkingBlock from "./ThinkingBlock";
 import MarkdownMessage from "./MarkdownMessage";
 import Copy from "./Copy";
+import BranchNavigator from "./BranchNavigator";
+import { parentKey, useMessages } from "../store/messages";
 
 export interface MessageViewProps {
   message: Message;
@@ -28,16 +30,30 @@ export const MessageView = React.memo(function MessageView({
     [index, setMessageRef]
   );
 
+  const parentKeyStr = parentKey(message.parent_message_id);
+  const variants = useMessages(
+    (state) => message.variants ?? state.variantsByParentId[parentKeyStr]
+  );
+  const currentIndex =
+    variants && message.id
+      ? Math.max(0, variants.findIndex((v) => v.id === message.id))
+      : (message.current_variant_index ?? 0);
+
   if (message.role === "user") {
     return (
-      <div
-        ref={setRef}
-        onClick={async()=> await navigator.clipboard.writeText(message.content)}
-        className={`flex justify-end text-right transition-all duration-200 cursor-pointer ${
-          isEditingThis ? "panel-card p-4 -m-4" : ""
-        }`}
-      >
-        <p className="w-[70%]">{message.content}</p>
+      <div ref={setRef} className="flex flex-col items-end">
+        <div
+          onClick={async () => await navigator.clipboard.writeText(message.content)}
+          className={`flex justify-end text-right transition-all duration-200 cursor-pointer w-full ${
+            isEditingThis ? "panel-card p-4 -m-4" : ""
+          }`}
+        >
+          <p className="w-[70%]">{message.content}</p>
+        </div>
+        <BranchNavigator
+          variants={variants}
+          currentIndex={currentIndex}
+        />
       </div>
     );
   }
@@ -65,7 +81,13 @@ export const MessageView = React.memo(function MessageView({
       {hasContent && (
         <div className="markdown-content">
           <MarkdownMessage content={message.content} />
-          <Copy text={message.content} />
+          <div className="flex items-center gap-3">
+            <Copy text={message.content} />
+            <BranchNavigator
+              variants={variants}
+              currentIndex={currentIndex}
+            />
+          </div>
         </div>
       )}
     </div>

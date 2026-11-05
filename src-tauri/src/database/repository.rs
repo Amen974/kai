@@ -1,7 +1,7 @@
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::models::{
-    chat_model::{ChatMessage, GetHistory, Role},
+    chat_model::{ChatMessage, GetHistory, MessageVariant, Role},
     error_model::ChatError,
 };
 
@@ -172,33 +172,59 @@ pub fn load_branch(
 
     let mut stmt = conn.prepare(
         "WITH RECURSIVE branch_tree(id, parent_message_id, role, content, thinking) AS (
-            -- Start from the head message of the branch
+
             SELECT m.id, m.parent_message_id, m.role, m.content, m.thinking
             FROM messages m
             JOIN branches b ON b.head_message_id = m.id
             WHERE b.id = ?1
             UNION ALL
-            -- Walk backwards through parent links
+
             SELECT m.id, m.parent_message_id, m.role, m.content, m.thinking
             FROM messages m
             JOIN branch_tree t ON m.id = t.parent_message_id
         )
-        SELECT id, role, content, thinking FROM branch_tree ORDER BY id ASC",
+        SELECT id, parent_message_id, role, content, thinking FROM branch_tree ORDER BY id ASC",
     )?;
 
     let chat_messages = stmt
         .query_map([branch_id], |row| {
-            let role_str: String = row.get(1)?;
+            let role_str: String = row.get(2)?;
             let role = Role::from_str(&role_str).ok_or(rusqlite::Error::InvalidQuery)?;
             Ok(ChatMessage {
+                id: Some(row.get(0)?),
+                parent_message_id: row.get(1)?,
                 role,
-                content: row.get(2)?,
-                thinking: row.get(3)?,
+                content: row.get(3)?,
+                thinking: row.get(4)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(chat_messages)
+}
+
+pub fn get_variants(
+    pool: &std::sync::Mutex<Connection>,
+    history_id: u32,
+    parent_message_id: Option<u32>,
+) -> Result<Vec<MessageVariant>, ChatError> {
+    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
+    let mut stmt = conn.prepare(
+        "SELECT id, branch_id
+         FROM messages
+         WHERE history_id = ?1
+           AND ((parent_message_id IS NULL AND ?2 IS NULL) OR parent_message_id = ?2)
+         ORDER BY id ASC",
+    )?;
+
+    let rows = stmt.query_map(rusqlite::params![history_id, parent_message_id], |row| {
+        Ok(MessageVariant {
+            id: row.get(0)?,
+            branch_id: row.get(1)?,
+        })
+    })?;
+
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
 pub fn get_nth_message_id(

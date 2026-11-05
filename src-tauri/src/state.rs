@@ -44,8 +44,15 @@ impl ChatSession {
         }
     }
 
-    pub fn push_user(&mut self, content: String) {
+    pub fn push_user(
+        &mut self,
+        content: String,
+        id: Option<u32>,
+        parent_message_id: Option<u32>,
+    ) {
         let user_message = ChatMessage {
+            id,
+            parent_message_id,
             role: User,
             content,
             thinking: None,
@@ -56,6 +63,8 @@ impl ChatSession {
 
     pub fn push_assistant_placeholder(&mut self) {
         let assistant_placeholder = ChatMessage {
+            id: None,
+            parent_message_id: None,
             role: Assistant,
             content: String::new(),
             thinking: None,

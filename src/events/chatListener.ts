@@ -1,5 +1,5 @@
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { ChatEvent, Message } from "../types";
+import { ChatEvent, SessionSnapshot } from "../types";
 import { useMessages } from "../store/messages";
 
 export async function setupChatEventListener(): Promise<() => void> {
@@ -13,14 +13,13 @@ export async function setupChatEventListener(): Promise<() => void> {
   });
   unlistens.push(unlistenChatEvent);
 
-  const unlistenMessages = await listen<Message[]>("update_messages", (event) => {
+  const unlistenSnapshot = await listen<SessionSnapshot>("update_snapshot", (event) => {
     dispatch({
       type: "Snapshot",
-      messages: event.payload,
-      generating: true,
+      ...event.payload,
     });
   });
-  unlistens.push(unlistenMessages);
+  unlistens.push(unlistenSnapshot);
 
   const unlistenContent = await listen<string>("update_message_content", (event) => {
     dispatch({
