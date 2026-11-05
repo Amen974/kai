@@ -9,6 +9,7 @@ pub enum ChatEvent {
         history_id: Option<u32>,
         messages: Vec<ChatMessage>,
         generating: bool,
+        active_branch_id: Option<u32>,
     },
 
     ContentDelta {

@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 
 use crate::commands::chat_command::{
     cancel_generation, delete_history, edit_message, get_history, get_session, load_chat,
-    new_chat, resend_message, send_message,
+    new_chat, resend_message, send_message, switch_branch,
 };
 use crate::state::ChatSession;
 
@@ -27,6 +27,7 @@ pub fn run() {
             messages: Vec::new(),
             active: None,
             next_generation_id: 0,
+            active_branch_id: None,
         }))
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -34,6 +35,7 @@ pub fn run() {
             resend_message,
             edit_message,
             load_chat,
+            switch_branch,
             new_chat,
             delete_history,
             cancel_generation,

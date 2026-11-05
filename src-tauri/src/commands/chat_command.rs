@@ -22,8 +22,22 @@ fn emit_event<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
 
 fn make_callback(app: AppHandle) -> impl Fn(ChatEvent) {
     move |event| match event {
-        ChatEvent::Snapshot { messages, .. } => {
-            emit_event(&app, "update_messages", messages);
+        ChatEvent::Snapshot {
+            history_id,
+            messages,
+            generating,
+            active_branch_id,
+        } => {
+            emit_event(
+                &app,
+                "update_snapshot",
+                SessionSnapshot {
+                    history_id,
+                    messages,
+                    generating,
+                    active_branch_id,
+                },
+            );
         }
         ChatEvent::ThinkingDelta { thinking } => {
             emit_event(&app, "update_thinking_content", thinking);
@@ -81,6 +95,15 @@ pub async fn load_chat(
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<SessionSnapshot, ChatError> {
     chat_service::load_chat(id, &chat_session, &pool).await
+}
+
+#[tauri::command]
+pub async fn switch_branch(
+    branch_id: u32,
+    chat_session: State<'_, Mutex<ChatSession>>,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<SessionSnapshot, ChatError> {
+    chat_service::switch_branch(branch_id, &chat_session, &pool).await
 }
 
 #[tauri::command]

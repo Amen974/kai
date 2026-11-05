@@ -87,4 +87,5 @@ pub struct SessionSnapshot {
     pub history_id: Option<u32>,
     pub messages: Vec<ChatMessage>,
     pub generating: bool,
+    pub active_branch_id: Option<u32>,
 }

@@ -7,8 +7,9 @@ use tokio_util::{bytes::Bytes, sync::CancellationToken};
 
 use crate::{
     database::repository::{
-        create_history, delete_history, delete_last_message, insert_message, load_messages,
-        touch_history, truncate_messages, update_title,
+        create_branch, create_history, delete_history, delete_last_message, get_active_branch,
+        get_head_message_id, get_nth_message_id, insert_message, load_branch, set_active_branch,
+        touch_history, update_branch_head, update_title,
     },
     models::{
         chat_event::ChatEvent,
@@ -29,6 +30,7 @@ fn snapshot_event(session: &ChatSession) -> ChatEvent {
         history_id: snapshot.history_id,
         messages: snapshot.messages,
         generating: snapshot.generating,
+        active_branch_id: snapshot.active_branch_id,
     }
 }
 
@@ -156,18 +158,31 @@ async fn persist_assistant(
     session_mutex: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
 ) -> Result<(), ChatError> {
-    let (history_id, content, thinking) = {
+    let (history_id, branch_id, parent_message_id, content, thinking) = {
         let state = session_mutex.lock().await;
-        let last = state.messages.last();
-        let content = last
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
-        let thinking = last.and_then(|m| m.thinking.clone());
-        (state.history_id, content, thinking)
+        let branch_id = state.active_branch_id.ok_or(ChatError::NoActiveBranch)?;
+        let last = state.messages.last().ok_or(ChatError::NoMessage)?;
+        let parent_id = get_head_message_id(pool, branch_id)?;
+        (
+            state.history_id,
+            branch_id,
+            parent_id,
+            last.content.clone(),
+            last.thinking.clone(),
+        )
     };
 
     if let Some(hid) = history_id {
-        insert_message(pool, hid, Assistant.as_str(), &content, thinking.as_deref())?;
+        let new_id = insert_message(
+            pool,
+            hid,
+            branch_id,
+            parent_message_id,
+            Assistant.as_str(),
+            &content,
+            thinking.as_deref(),
+        )?;
+        update_branch_head(pool, branch_id, new_id)?;
         touch_history(pool, hid)?;
     }
 
@@ -207,11 +222,12 @@ async fn finalize_generation(
         StopReason::Cancelled => {
             let has_content = {
                 let mut state = session_mutex.lock().await;
+                let branch_id = state.active_branch_id.ok_or(ChatError::NoActiveBranch)?;
                 if let Some(last) = state.messages.last() {
                     if matches!(last.role, Assistant) && last.content.is_empty() {
                         let _ = state.pop_last_assistant();
                         if let Some(hid) = state.history_id {
-                            delete_last_message(pool, hid)?;
+                            delete_last_message(pool, hid, branch_id)?;
                         }
                         false
                     } else {
@@ -245,11 +261,12 @@ async fn finalize_generation(
         StopReason::Eof => {
             let has_content = {
                 let mut state = session_mutex.lock().await;
+                let branch_id = state.active_branch_id.ok_or(ChatError::NoActiveBranch)?;
                 if let Some(last) = state.messages.last() {
                     if matches!(last.role, Assistant) && last.content.is_empty() {
                         let _ = state.pop_last_assistant();
                         if let Some(hid) = state.history_id {
-                            delete_last_message(pool, hid)?;
+                            delete_last_message(pool, hid, branch_id)?;
                         }
                         false
                     } else {
@@ -385,7 +402,7 @@ async fn record_user_message(
     pool: &std::sync::Mutex<Connection>,
     content: &String,
     update_callback: &impl Fn(ChatEvent),
-) -> Result<bool, ChatError> {
+) -> Result<(bool, u32), ChatError> {
     if content.trim().is_empty() {
         return Err(ChatError::EmptyMessage);
     }
@@ -394,17 +411,35 @@ async fn record_user_message(
 
     let is_new = state.history_id.is_none();
     if is_new {
-        state.history_id = Some(create_history(pool)?);
+        let history_id = create_history(pool)?;
+        state.history_id = Some(history_id);
+
+        let branch_id = create_branch(pool, history_id, None, None)?;
+        set_active_branch(pool, branch_id, history_id)?;
+        state.active_branch_id = Some(branch_id);
     }
+
     let history_id = state.history_id.expect("set above");
+    let branch_id = state.active_branch_id.ok_or(ChatError::NoActiveBranch)?;
+
+    let parent_message_id = get_head_message_id(pool, branch_id)?;
+    let new_id = insert_message(
+        pool,
+        history_id,
+        branch_id,
+        parent_message_id,
+        User.as_str(),
+        content,
+        None,
+    )?;
+
+    update_branch_head(pool, branch_id, new_id)?;
+    touch_history(pool, history_id)?;
 
     state.push_user(content.clone());
     update_callback(snapshot_event(&state));
 
-    insert_message(pool, history_id, User.as_str(), &content, None)?;
-    touch_history(pool, history_id)?;
-
-    Ok(is_new)
+    Ok((is_new, new_id))
 }
 
 pub async fn send(
@@ -413,7 +448,7 @@ pub async fn send(
     pool: &std::sync::Mutex<Connection>,
     update_callback: impl Fn(ChatEvent),
 ) -> Result<(), ChatError> {
-    let is_new = record_user_message(session, pool, &message, &update_callback).await?;
+    let (is_new, _) = record_user_message(session, pool, &message, &update_callback).await?;
     generate(session, pool, &update_callback).await?;
     if is_new {
         title_if_missing(session, pool, &message, &update_callback).await;
@@ -428,13 +463,14 @@ pub async fn resend(
 ) -> Result<(), ChatError> {
     {
         let mut state = session.lock().await;
+        let branch_id = state.active_branch_id.ok_or(ChatError::NoActiveBranch)?;
 
         if let Some(last) = state.messages.last() {
             if matches!(last.role, Assistant) {
-                state.pop_last_assistant()?; 
+                state.pop_last_assistant()?;
 
                 if let Some(hid) = state.history_id {
-                    delete_last_message(pool, hid)?;
+                    delete_last_message(pool, hid, branch_id)?;
                 }
             }
         }
@@ -450,14 +486,28 @@ pub async fn edit(
     pool: &std::sync::Mutex<Connection>,
     update_callback: impl Fn(ChatEvent),
 ) -> Result<(), ChatError> {
-    let history_id = {
+    {
         let mut state = session.lock().await;
+
         state.truncate(index as u32)?;
-        state.history_id
-    };
-    
-    if let Some(hid) = history_id {
-        truncate_messages(pool, hid, index)?;
+
+        let history_id = state.history_id.ok_or(ChatError::NoActiveBranch)?;
+        let current_branch_id = state.active_branch_id.ok_or(ChatError::NoActiveBranch)?;
+
+        let fork_message_id: Option<u32> = if index > 0 {
+            get_nth_message_id(pool, current_branch_id, index - 1)?
+        } else {
+            None
+        };
+
+        let new_branch_id = create_branch(pool, history_id, Some(current_branch_id), fork_message_id)?;
+
+        if let Some(fmid) = fork_message_id {
+            update_branch_head(pool, new_branch_id, fmid)?;
+        }
+
+        state.active_branch_id = Some(new_branch_id);
+        set_active_branch(pool, new_branch_id, history_id)?;
     }
 
     send(new_message, session, pool, update_callback).await
@@ -470,10 +520,35 @@ pub async fn load_chat(
 ) -> Result<SessionSnapshot, ChatError> {
     cancel_generation(session).await?;
 
-    let messages = load_messages(pool, id)?;
+    let active_branch_id = get_active_branch(pool, id)?;
+
+    let messages = load_branch(pool, active_branch_id)?;
 
     let mut state = session.lock().await;
-    state.replace(id, messages);
+    state.replace(id, messages, active_branch_id);
+
+    Ok(state.snapshot())
+}
+
+pub async fn switch_branch(
+    branch_id: u32,
+    session: &Mutex<ChatSession>,
+    pool: &std::sync::Mutex<Connection>,
+) -> Result<SessionSnapshot, ChatError> {
+    cancel_generation(session).await?;
+
+    let history_id = {
+        let state = session.lock().await;
+        state.history_id.ok_or(ChatError::NoActiveBranch)?
+    };
+
+    let messages = load_branch(pool, branch_id)?;
+
+    set_active_branch(pool, branch_id, history_id)?;
+
+    let mut state = session.lock().await;
+    state.messages = messages;
+    state.active_branch_id = Some(branch_id);
 
     Ok(state.snapshot())
 }

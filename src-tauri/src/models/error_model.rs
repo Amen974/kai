@@ -18,6 +18,12 @@ pub enum ChatError {
     #[error("message content must not be empty")]
     EmptyMessage,
 
+    #[error("no active branch")]
+    NoActiveBranch,
+
+    #[error("no messages available")]
+    NoMessage,
+
     #[error(transparent)]
     Db(#[from] rusqlite::Error),
 

@@ -14,6 +14,7 @@ pub struct ChatSession  {
     pub(crate) messages: Vec<ChatMessage>,
     pub(crate) active: Option<ActiveStream>,
     pub(crate) next_generation_id: u32,
+    pub(crate) active_branch_id: Option<u32>,
 }
 
 impl ChatSession {
@@ -128,15 +129,17 @@ impl ChatSession {
         Ok(())
     }
 
-    pub fn replace(&mut self, history_id: u32, messages: Vec<ChatMessage>) {
+    pub fn replace(&mut self, history_id: u32, messages: Vec<ChatMessage>, active_branch_id: u32) {
         self.history_id = Some(history_id);
         self.messages = messages;
+        self.active_branch_id = Some(active_branch_id);
     }
 
     pub fn reset(&mut self) {
         self.history_id = None;
         self.messages.clear();
         self.active = None;
+        self.active_branch_id = None;
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
@@ -144,6 +147,7 @@ impl ChatSession {
             history_id: self.history_id,
             messages: self.messages.clone(),
             generating: self.active.is_some(),
+            active_branch_id: self.active_branch_id,
         }
    }
 }
