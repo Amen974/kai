@@ -151,3 +151,11 @@ pub fn get_history(
 ) -> Result<Vec<GetHistory>, ChatError> {
     repository::get_history(&pool)
 }
+
+#[tauri::command]
+pub fn search_history(
+    query: String,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<Vec<GetHistory>, ChatError> {
+    repository::search_history(&pool, &query)
+}

@@ -15,6 +15,7 @@ export interface UIState {
   historyList: Conversation[];
   historyIndex: number;
   historyArmedId: number | null;
+  historySearchQuery: string;
   scrollPinSignal: number;
   setMode: (mode: UIMode) => void;
   setOverlay: (overlay: UIOverlay) => void;
@@ -26,6 +27,7 @@ export interface UIState {
   setHistoryList: (list: Conversation[]) => void;
   setHistoryIndex: (index: number) => void;
   setHistoryArmedId: (id: number | null) => void;
+  setHistorySearchQuery: (query: string) => void;
   forceScrollPin: () => void;
   closeTopmost: () => void;
 }
@@ -41,6 +43,7 @@ export const useUI = create<UIState>(set => ({
   historyList: [],
   historyIndex: 0,
   historyArmedId: null,
+  historySearchQuery: "",
 
   setMode: (mode) => set({ mode }),
   setOverlay: (overlay) => set({ overlay }),
@@ -70,12 +73,13 @@ export const useUI = create<UIState>(set => ({
   setHistoryList: (historyList) => set({ historyList }),
   setHistoryIndex: (historyIndex) => set({ historyIndex }),
   setHistoryArmedId: (historyArmedId) => set({ historyArmedId }),
+  setHistorySearchQuery: (historySearchQuery) => set({ historySearchQuery }),
 
   forceScrollPin: () => set((state) => ({ scrollPinSignal: state.scrollPinSignal + 1 })),
 
 
   closeTopmost: () => {
-      set({ overlay: null, mode: "idle", editIndex: null, editDraft: "", historyArmedId: null });
+      set({ overlay: null, mode: "idle", editIndex: null, editDraft: "", historyArmedId: null, historySearchQuery: "" });
       return;
   },
 }));

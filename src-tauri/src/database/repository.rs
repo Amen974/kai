@@ -54,6 +54,42 @@ pub fn get_history(pool: &std::sync::Mutex<Connection>) -> Result<Vec<GetHistory
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
+pub fn search_history(
+    pool: &std::sync::Mutex<Connection>,
+    query: &str,
+) -> Result<Vec<GetHistory>, ChatError> {
+    let tokens: Vec<String> = query
+        .split_whitespace()
+        .map(|t| t.chars().filter(|c| !c.is_control() && *c != '"').collect::<String>())
+        .filter(|t| !t.is_empty())
+        .map(|t| format!("\"{t}\"*"))
+        .collect();
+
+    if tokens.is_empty() {
+        return get_history(pool);
+    }
+
+    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
+    let mut stmt = conn.prepare(
+        "SELECT h.id, h.title
+         FROM historys h
+         JOIN (
+             SELECT history_id, MIN(rank) AS min_rank
+             FROM history_fts5
+             WHERE history_fts5 MATCH ?1
+             GROUP BY history_id
+         ) matched ON h.id = matched.history_id
+         ORDER BY matched.min_rank ASC, h.updated_at DESC",
+    )?;
+    let rows = stmt.query_map([tokens.join(" ")], |row| {
+        Ok(GetHistory {
+            id: row.get(0)?,
+            title: row.get(1)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
 pub fn create_branch(
     pool: &std::sync::Mutex<Connection>,
     history_id: u32,

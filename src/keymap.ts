@@ -199,12 +199,12 @@ export const keymap: KeyBinding[] = [
     },
   },
   {
-    keys: "Delete",
+    keys: "ctrl+Delete",
     layers: ["history"],
     run: handleDeleteHistory,
   },
   {
-    keys: "Backspace",
+    keys: "ctrl+Backspace",
     layers: ["history"],
     run: handleDeleteHistory,
   },

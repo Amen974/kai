@@ -83,10 +83,6 @@ export const MessageView = React.memo(function MessageView({
           <MarkdownMessage content={message.content} />
           <div className="flex items-center gap-3">
             <Copy text={message.content} />
-            <BranchNavigator
-              variants={variants}
-              currentIndex={currentIndex}
-            />
           </div>
         </div>
       )}

@@ -3,7 +3,7 @@ use tokio::sync::Mutex;
 
 use crate::commands::chat_command::{
     cancel_generation, delete_history, edit_message, get_history, get_session, get_variants,
-    load_chat, new_chat, resend_message, send_message, switch_branch,
+    load_chat, new_chat, resend_message, search_history, send_message, switch_branch,
 };
 use crate::state::ChatSession;
 
@@ -41,6 +41,7 @@ pub fn run() {
             cancel_generation,
             get_session,
             get_history,
+            search_history,
             get_variants,
         ])
         .run(tauri::generate_context!())

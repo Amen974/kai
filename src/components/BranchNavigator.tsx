@@ -67,7 +67,7 @@ export const BranchNavigator = React.memo(function BranchNavigator({
         disabled={currentIndex >= total - 1}
         onClick={handleNext}
         aria-label="Next version"
-        className="p-1 rounded transition-colors hover:text-(--color-text-main) disabled:opacity-25 disabled:cursor-not-allowed cursor-pointer"
+        className="p-1 rounded transition-colors hover:text-(--color-text-main) disabled:opacity-25 disabled:cursor-default cursor-pointer"
       >
         <svg
           aria-hidden="true"
