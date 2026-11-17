@@ -1,6 +1,6 @@
 use reqwest::Response;
 
-use crate::models::{chat_model::{OllamaGenerateResponse, OllamaRequest, OllamaRequestGenerate}, error_model::ChatError};
+use crate::models::{ai_model::{OllamaShowRequest, OllamaShowResponse, OllamaTagsResponse}, chat_model::{OllamaGenerateResponse, OllamaRequest, OllamaRequestGenerate}, error_model::ChatError};
 
 
 pub async fn post_chat(payload: OllamaRequest) -> Result<Response, ChatError> {
@@ -14,6 +14,39 @@ pub async fn post_chat(payload: OllamaRequest) -> Result<Response, ChatError> {
         .error_for_status()?;
 
     return Ok(response);
+}
+
+pub async fn get_tags() -> Result<OllamaTagsResponse, ChatError> {
+    let client = reqwest::Client::new();
+
+    let response = client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let data: OllamaTagsResponse = response.json().await?;
+
+    return Ok(data);
+}
+
+pub async fn show_model(name: &str) -> Result<OllamaShowResponse, ChatError> {
+    let client = reqwest::Client::new();
+
+    let payload = OllamaShowRequest {
+        model: name.to_string(),
+    };
+
+    let response = client
+        .post("http://localhost:11434/api/show")
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    let data: OllamaShowResponse = response.json().await?;
+
+    return Ok(data);
 }
 
 pub async fn post_generate(payload: OllamaRequestGenerate) -> Result<String, ChatError> {

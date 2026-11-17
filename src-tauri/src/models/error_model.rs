@@ -24,6 +24,12 @@ pub enum ChatError {
     #[error("no messages available")]
     NoMessage,
 
+    #[error("model '{0}' not found")]
+    ModelNotFound(String),
+
+    #[error("no active model selected")]
+    NoActiveModel,
+
     #[error(transparent)]
     Db(#[from] rusqlite::Error),
 

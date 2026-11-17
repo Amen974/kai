@@ -1,6 +1,7 @@
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::models::{
+    ai_model::AiModel,
     chat_model::{ChatMessage, GetHistory, MessageVariant, Role},
     error_model::ChatError,
 };
@@ -286,6 +287,89 @@ pub fn get_nth_message_id(
         .query_row([branch_id as i64, n as i64], |row| row.get(0))
         .optional()?;
     Ok(result)
+}
+
+pub fn get_models(pool: &std::sync::Mutex<Connection>) -> Result<Vec<AiModel>, ChatError> {
+    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
+    let mut stmt = conn.prepare(
+        "SELECT name, family, parameter_size, quantization_level, size_bytes, modified_at, supports_vision, active
+         FROM models ORDER BY name ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(AiModel {
+            name: row.get(0)?,
+            family: row.get(1)?,
+            parameter_size: row.get(2)?,
+            quantization_level: row.get(3)?,
+            size_bytes: row.get(4)?,
+            modified_at: row.get(5)?,
+            supports_vision: row.get(6)?,
+            active: row.get(7)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+pub fn get_active_model_name(
+    pool: &std::sync::Mutex<Connection>,
+) -> Result<Option<String>, ChatError> {
+    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
+    let name: Option<String> = conn
+        .query_row("SELECT name FROM models WHERE active = 1", [], |row| {
+            row.get(0)
+        })
+        .optional()?;
+    Ok(name)
+}
+
+pub fn replace_models(
+    pool: &std::sync::Mutex<Connection>,
+    models: &[AiModel],
+    active: Option<&str>,
+) -> Result<(), ChatError> {
+    let mut conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
+    let tx = conn.transaction()?;
+
+    tx.execute("DELETE FROM models", [])?;
+
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO models (name, family, parameter_size, quantization_level, size_bytes, modified_at, supports_vision, active)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for model in models {
+            stmt.execute(rusqlite::params![
+                model.name,
+                model.family,
+                model.parameter_size,
+                model.quantization_level,
+                model.size_bytes,
+                model.modified_at,
+                model.supports_vision,
+                active == Some(model.name.as_str()),
+            ])?;
+        }
+    }
+
+    tx.commit()?;
+    Ok(())
+}
+
+pub fn set_active_model(
+    pool: &std::sync::Mutex<Connection>,
+    name: &str,
+) -> Result<(), ChatError> {
+    let mut conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
+    let tx = conn.transaction()?;
+
+    tx.execute("UPDATE models SET active = 0 WHERE active = 1", [])?;
+
+    if tx.execute("UPDATE models SET active = 1 WHERE name = ?1", [name])? == 0 {
+        return Err(ChatError::ModelNotFound(name.to_string()));
+    }
+
+    tx.commit()?;
+    Ok(())
 }
 
 #[allow(dead_code)]
