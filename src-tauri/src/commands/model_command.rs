@@ -1,23 +1,28 @@
 use rusqlite::Connection;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::{
-    models::{ai_model::AiModel, error_model::ChatError},
+    commands::chat_command::emit_chat_event,
+    database::repository,
+    models::{ai_model::AiModel, chat_event::ChatEvent, error_model::ChatError},
     services::model_service,
 };
 
 #[tauri::command]
 pub async fn sync_models(
+    app: AppHandle,
     pool: State<'_, std::sync::Mutex<Connection>>,
-) -> Result<Vec<AiModel>, ChatError> {
-    model_service::sync_models(&pool).await
+) -> Result<(), ChatError> {
+    model_service::sync_models(&pool).await?;
+    emit_chat_event(&app, ChatEvent::ModelsChanged);
+    Ok(())
 }
 
 #[tauri::command]
 pub fn get_models(
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<Vec<AiModel>, ChatError> {
-    model_service::list_models(&pool)
+    repository::get_models(&pool)
 }
 
 #[tauri::command]
@@ -29,8 +34,11 @@ pub fn get_active_model(
 
 #[tauri::command]
 pub fn set_active_model(
+    app: AppHandle,
     name: String,
     pool: State<'_, std::sync::Mutex<Connection>>,
-) -> Result<Vec<AiModel>, ChatError> {
-    model_service::set_active_model(&pool, &name)
+) -> Result<(), ChatError> {
+    model_service::set_active_model(&pool, &name)?;
+    emit_chat_event(&app, ChatEvent::ModelsChanged);
+    Ok(())
 }

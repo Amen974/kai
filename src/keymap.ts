@@ -1,5 +1,5 @@
 import { useUI, UILayer, getActiveLayer } from "./store/ui";
-import { useMessages, run } from "./store/messages";
+import { useMessages, run, selectModel, syncModels } from "./store/messages";
 import { SessionSnapshot } from "./types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -72,17 +72,17 @@ export const keymap: KeyBinding[] = [
   },
   {
     keys: "ctrl+w",
-    layers: ["idle", "compose", "edit", "history"],
+    layers: ["idle", "compose", "edit", "history", "models"],
     run: () => getCurrentWindow().close(),
   },
   {
     keys: "ctrl+shift+m",
-    layers: ["idle", "compose", "edit", "history"],
+    layers: ["idle", "compose", "edit", "history", "models"],
     run: () => getCurrentWindow().minimize(),
   },
   {
     keys: "F11",
-    layers: ["idle", "compose", "edit", "history"],
+    layers: ["idle", "compose", "edit", "history", "models"],
     run: async () => {
       const win = getCurrentWindow();
       await win.setFullscreen(!(await win.isFullscreen()));
@@ -90,7 +90,7 @@ export const keymap: KeyBinding[] = [
   },
   {
     keys: "Escape",
-    layers: ["compose", "edit", "history"],
+    layers: ["compose", "edit", "history", "models"],
     run: () => {
       useMessages.getState().setError(null);
       useUI.getState().closeTopmost();
@@ -156,6 +156,19 @@ export const keymap: KeyBinding[] = [
     },
   },
   {
+    keys: "ctrl+k",
+    layers: ["idle", "models"],
+    run: () => {
+      const { overlay, mode } = useUI.getState();
+      if (overlay === "models") {
+        useUI.getState().setOverlay(null);
+      } else if (mode === "idle" && overlay === null) {
+        const idx = useMessages.getState().models.findIndex((model) => model.active);
+        useUI.setState({ overlay: "models", modelIndex: idx >= 0 ? idx : 0 });
+      }
+    },
+  },
+  {
     keys: "ArrowUp",
     layers: ["history"],
     run: () => {
@@ -207,6 +220,37 @@ export const keymap: KeyBinding[] = [
     keys: "ctrl+Backspace",
     layers: ["history"],
     run: handleDeleteHistory,
+  },
+  {
+    keys: "ArrowUp",
+    layers: ["models"],
+    run: () => {
+      const { modelIndex, setModelIndex } = useUI.getState();
+      setModelIndex(Math.max(0, modelIndex - 1));
+    },
+  },
+  {
+    keys: "ArrowDown",
+    layers: ["models"],
+    run: () => {
+      const { modelIndex, setModelIndex } = useUI.getState();
+      const count = useMessages.getState().models.length;
+      setModelIndex(Math.min(Math.max(0, count - 1), modelIndex + 1));
+    },
+  },
+  {
+    keys: "Enter",
+    layers: ["models"],
+    run: async () => {
+      await selectModel(useUI.getState().modelIndex);
+    },
+  },
+  {
+    keys: "ctrl+r",
+    layers: ["models"],
+    run: async () => {
+      await syncModels();
+    },
   },
 ];
 

@@ -14,14 +14,14 @@ use crate::{
     state::ChatSession,
 };
 
-fn emit_event<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
+pub(crate) fn emit_event<T: Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
     if let Err(error) = app.emit(event, payload) {
         eprintln!("Failed to emit Tauri event '{event}': {error}");
     }
 }
 
-fn make_callback(app: AppHandle) -> impl Fn(ChatEvent) {
-    move |event| match event {
+pub(crate) fn emit_chat_event(app: &AppHandle, event: ChatEvent) {
+    match event {
         ChatEvent::Snapshot {
             history_id,
             messages,
@@ -29,7 +29,7 @@ fn make_callback(app: AppHandle) -> impl Fn(ChatEvent) {
             active_branch_id,
         } => {
             emit_event(
-                &app,
+                app,
                 "update_snapshot",
                 SessionSnapshot {
                     history_id,
@@ -40,22 +40,29 @@ fn make_callback(app: AppHandle) -> impl Fn(ChatEvent) {
             );
         }
         ChatEvent::ThinkingDelta { thinking } => {
-            emit_event(&app, "update_thinking_content", thinking);
+            emit_event(app, "update_thinking_content", thinking);
         }
         ChatEvent::ContentDelta { content } => {
-            emit_event(&app, "update_message_content", content);
+            emit_event(app, "update_message_content", content);
         }
         ChatEvent::GenerationFinished { .. } => {
-            emit_event(&app, "emit_done", ());
+            emit_event(app, "emit_done", ());
         }
         ChatEvent::Error { message } => {
-            emit_event(&app, "chat_error", message);
-            emit_event(&app, "emit_done", ());
+            emit_event(app, "chat_error", message);
+            emit_event(app, "emit_done", ());
         }
         ChatEvent::HistoryChanged => {
-            emit_event(&app, "history_changed", ());
+            emit_event(app, "history_changed", ());
+        }
+        ChatEvent::ModelsChanged => {
+            emit_event(app, "models_changed", ());
         }
     }
+}
+
+fn make_callback(app: AppHandle) -> impl Fn(ChatEvent) {
+    move |event| emit_chat_event(&app, event)
 }
 
 #[tauri::command]

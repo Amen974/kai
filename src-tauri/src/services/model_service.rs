@@ -2,67 +2,50 @@ use rusqlite::Connection;
 
 use crate::{
     database::repository,
-    models::{
-        ai_model::{AiModel, OllamaTag},
-        error_model::ChatError,
-    },
+    models::{ai_model::AiModel, error_model::ChatError},
     ollama::{get_tags, show_model},
 };
 
-fn to_model(tag: OllamaTag, supports_vision: bool) -> AiModel {
-    AiModel {
-        name: tag.name,
-        family: tag.details.family,
-        parameter_size: tag.details.parameter_size,
-        quantization_level: tag.details.quantization_level,
-        size_bytes: tag.size,
-        modified_at: tag.modified_at,
-        supports_vision,
-        active: false,
-    }
-}
-
-async fn has_vision(name: &str) -> Result<bool, ChatError> {
-    let capabilities = show_model(name).await?.capabilities;
-    Ok(capabilities.iter().any(|capability| capability == "vision"))
-}
-
-pub async fn sync_models(
-    pool: &std::sync::Mutex<Connection>,
-) -> Result<Vec<AiModel>, ChatError> {
+pub async fn sync_models(pool: &std::sync::Mutex<Connection>) -> Result<(), ChatError> {
     let tags = get_tags().await?;
+    let previous_active = active_model(pool)?.map(|model| model.name);
 
     let mut models = Vec::with_capacity(tags.models.len());
     for tag in tags.models {
-        let supports_vision = has_vision(&tag.name).await?;
-        models.push(to_model(tag, supports_vision));
+        let supports_vision = show_model(&tag.name)
+            .await?
+            .capabilities
+            .iter()
+            .any(|capability| capability == "vision");
+
+        models.push(AiModel {
+            active: previous_active.as_deref() == Some(tag.name.as_str()),
+            name: tag.name,
+            family: tag.details.family,
+            parameter_size: tag.details.parameter_size,
+            quantization_level: tag.details.quantization_level,
+            size_bytes: tag.size,
+            modified_at: tag.modified_at,
+            supports_vision,
+        });
     }
 
-    let active = repository::get_active_model_name(pool)?
-        .filter(|name| models.iter().any(|model| &model.name == name))
-        .or_else(|| models.first().map(|model| model.name.clone()));
-
-    repository::replace_models(pool, &models, active.as_deref())?;
-
-    repository::get_models(pool)
-}
-
-pub async fn sync_if_empty(pool: &std::sync::Mutex<Connection>) -> Result<(), ChatError> {
-    if !repository::get_models(pool)?.is_empty() {
-        return Ok(());
+    if !models.iter().any(|model| model.active) {
+        if let Some(first) = models.first_mut() {
+            first.active = true;
+        }
     }
 
-    sync_models(pool).await?;
-
-    Ok(())
+    repository::replace_models(pool, &models)
 }
 
-pub fn list_models(pool: &std::sync::Mutex<Connection>) -> Result<Vec<AiModel>, ChatError> {
-    get_models(pool)
-}
+pub async fn sync_if_empty(pool: &std::sync::Mutex<Connection>) -> Result<bool, ChatError> {
+    if repository::get_models(pool)?.is_empty() {
+        sync_models(pool).await?;
+        return Ok(true);
+    }
 
-pub fn get_models(pool: &std::sync::Mutex<Connection>) -> Result<Vec<AiModel>, ChatError> {
-    repository::get_models(pool)
+    Ok(false)
 }
 
 pub fn active_model(pool: &std::sync::Mutex<Connection>) -> Result<Option<AiModel>, ChatError> {
@@ -71,10 +54,6 @@ pub fn active_model(pool: &std::sync::Mutex<Connection>) -> Result<Option<AiMode
         .find(|model| model.active))
 }
 
-pub fn set_active_model(
-    pool: &std::sync::Mutex<Connection>,
-    name: &str,
-) -> Result<Vec<AiModel>, ChatError> {
-    repository::set_active_model(pool, name)?;
-    repository::get_models(pool)
+pub fn set_active_model(pool: &std::sync::Mutex<Connection>, name: &str) -> Result<(), ChatError> {
+    repository::set_active_model(pool, name)
 }

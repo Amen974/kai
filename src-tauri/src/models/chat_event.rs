@@ -29,4 +29,6 @@ pub enum ChatEvent {
     },
 
     HistoryChanged,
+
+    ModelsChanged,
 }

@@ -60,6 +60,13 @@ export async function setupChatEventListener(): Promise<() => void> {
   });
   unlistens.push(unlistenHistory);
 
+  const unlistenModels = await listen<void>("models_changed", () => {
+    dispatch({
+      type: "ModelsChanged",
+    });
+  });
+  unlistens.push(unlistenModels);
+
   return () => {
     for (const unlisten of unlistens) {
       unlisten();

@@ -5,6 +5,7 @@ import Home from "./pages/Home";
 import Chat from "./pages/chat/Chat";
 import SideLabels from "./components/Sidelabels";
 import HistoryPanel from "./components/HistoryPanel";
+import ModelPanel from "./components/ModelPanel";
 import { setupChatEventListener } from "./events/chatListener";
 import { run, useMessages } from "./store/messages";
 import { handleKeydown } from "./keymap";
@@ -59,6 +60,7 @@ function App() {
   return (
     <main className="h-screen w-full flex flex-col overflow-hidden relative">
       <SideLabels />
+      <ModelPanel />
       <HistoryPanel />
       {isHome ? <Home /> : <Chat />}
       <InputBar isHome={isHome} />

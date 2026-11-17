@@ -310,22 +310,9 @@ pub fn get_models(pool: &std::sync::Mutex<Connection>) -> Result<Vec<AiModel>, C
     Ok(rows.collect::<Result<Vec<_>, _>>()?)
 }
 
-pub fn get_active_model_name(
-    pool: &std::sync::Mutex<Connection>,
-) -> Result<Option<String>, ChatError> {
-    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
-    let name: Option<String> = conn
-        .query_row("SELECT name FROM models WHERE active = 1", [], |row| {
-            row.get(0)
-        })
-        .optional()?;
-    Ok(name)
-}
-
 pub fn replace_models(
     pool: &std::sync::Mutex<Connection>,
     models: &[AiModel],
-    active: Option<&str>,
 ) -> Result<(), ChatError> {
     let mut conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
     let tx = conn.transaction()?;
@@ -346,7 +333,7 @@ pub fn replace_models(
                 model.size_bytes,
                 model.modified_at,
                 model.supports_vision,
-                active == Some(model.name.as_str()),
+                model.active,
             ])?;
         }
     }

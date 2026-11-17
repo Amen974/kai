@@ -2,8 +2,8 @@ import { create } from "zustand";
 import { Conversation } from "../types";
 
 export type UIMode = "idle" | "compose" | "edit";
-export type UIOverlay = "history" | null;
-export type UILayer = "history" | "compose" | "edit" | "idle";
+export type UIOverlay = "history" | "models" | null;
+export type UILayer = "history" | "models" | "compose" | "edit" | "idle";
 
 export interface UIState {
   mode: UIMode;
@@ -16,6 +16,7 @@ export interface UIState {
   historyIndex: number;
   historyArmedId: number | null;
   historySearchQuery: string;
+  modelIndex: number;
   scrollPinSignal: number;
   setMode: (mode: UIMode) => void;
   setOverlay: (overlay: UIOverlay) => void;
@@ -28,6 +29,7 @@ export interface UIState {
   setHistoryIndex: (index: number) => void;
   setHistoryArmedId: (id: number | null) => void;
   setHistorySearchQuery: (query: string) => void;
+  setModelIndex: (index: number) => void;
   forceScrollPin: () => void;
   closeTopmost: () => void;
 }
@@ -44,6 +46,7 @@ export const useUI = create<UIState>(set => ({
   historyIndex: 0,
   historyArmedId: null,
   historySearchQuery: "",
+  modelIndex: 0,
 
   setMode: (mode) => set({ mode }),
   setOverlay: (overlay) => set({ overlay }),
@@ -74,12 +77,13 @@ export const useUI = create<UIState>(set => ({
   setHistoryIndex: (historyIndex) => set({ historyIndex }),
   setHistoryArmedId: (historyArmedId) => set({ historyArmedId }),
   setHistorySearchQuery: (historySearchQuery) => set({ historySearchQuery }),
+  setModelIndex: (modelIndex) => set({ modelIndex }),
 
   forceScrollPin: () => set((state) => ({ scrollPinSignal: state.scrollPinSignal + 1 })),
 
 
   closeTopmost: () => {
-      set({ overlay: null, mode: "idle", editIndex: null, editDraft: "", historyArmedId: null, historySearchQuery: "" });
+      set({ overlay: null, mode: "idle", editIndex: null, editDraft: "", historyArmedId: null, historySearchQuery: "", modelIndex: 0 });
       return;
   },
 }));

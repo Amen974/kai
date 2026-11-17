@@ -3,9 +3,11 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 
 use crate::commands::chat_command::{
-    cancel_generation, delete_history, edit_message, get_history, get_session, get_variants,
-    load_chat, new_chat, resend_message, search_history, send_message, switch_branch,
+    cancel_generation, delete_history, edit_message, emit_chat_event, get_history, get_session,
+    get_variants, load_chat, new_chat, resend_message, search_history, send_message,
+    switch_branch,
 };
+use crate::models::chat_event::ChatEvent;
 use crate::commands::model_command::{get_active_model, get_models, set_active_model, sync_models};
 use crate::services::model_service;
 use crate::state::ChatSession;
@@ -27,8 +29,10 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let pool = handle.state::<std::sync::Mutex<Connection>>();
-                if let Err(error) = model_service::sync_if_empty(&pool).await {
-                    eprintln!("Failed to sync Ollama models: {error}");
+                match model_service::sync_if_empty(&pool).await {
+                    Ok(true) => emit_chat_event(&handle, ChatEvent::ModelsChanged),
+                    Ok(false) => {}
+                    Err(error) => eprintln!("Failed to sync Ollama models: {error}"),
                 }
             });
 

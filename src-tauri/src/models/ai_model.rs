@@ -1,4 +1,4 @@
-#[derive(serde::Serialize, Clone)]
+#[derive(serde::Serialize)]
 pub struct AiModel {
     pub(crate) name: String,
     pub(crate) family: String,

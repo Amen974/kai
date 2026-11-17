@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { ChatEvent, Message, MessageVariant, SessionSnapshot } from "../types";
+import { ChatEvent, Message, MessageVariant, ModelInfo, SessionSnapshot } from "../types";
 import { useUI } from "./ui";
 
 export interface ChatState {
@@ -8,9 +8,11 @@ export interface ChatState {
   historyId: number | null;
   activeBranchId: number | null;
   variantsByParentId: Record<string, MessageVariant[]>;
+  models: ModelInfo[];
   isGenerating: boolean;
   error: string | null;
   historyVersion: number;
+  modelsVersion: number;
   dispatch: (event: ChatEvent) => void;
   setError: (error: string | null) => void;
 }
@@ -78,6 +80,12 @@ export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatSta
         historyVersion: state.historyVersion + 1,
       };
     }
+
+    case "ModelsChanged": {
+      return {
+        modelsVersion: state.modelsVersion + 1,
+      };
+    }
   }
 }
 
@@ -86,9 +94,11 @@ export const useMessages = create<ChatState>((set) => ({
   historyId: null,
   activeBranchId: null,
   variantsByParentId: {},
+  models: [],
   isGenerating: false,
   error: null,
   historyVersion: 0,
+  modelsVersion: 0,
   dispatch: (event: ChatEvent) => {
     set((state) => chatReducer(state, event));
     if (event.type === "Snapshot" || event.type === "GenerationFinished") {
@@ -149,6 +159,41 @@ export async function switchBranch(branchId: number): Promise<void> {
     useUI.getState().forceScrollPin();
   } catch (err) {
     console.error("Failed to switch branch:", err);
+  }
+}
+
+export async function loadModels(): Promise<void> {
+  try {
+    useMessages.setState({ models: await run<ModelInfo[]>("get_models") });
+  } catch (err) {
+    console.error("Failed to load models:", err);
+  }
+}
+
+export async function selectModel(index: number): Promise<void> {
+  const model = useMessages.getState().models[index];
+  if (!model) return;
+
+  useUI.getState().setModelIndex(index);
+  if (!model.active && !(await switchModel(model.name))) return;
+  useUI.getState().setOverlay(null);
+}
+
+async function switchModel(name: string): Promise<boolean> {
+  try {
+    await run("set_active_model", { name });
+    return true;
+  } catch (err) {
+    console.error("Failed to switch model:", err);
+    return false;
+  }
+}
+
+export async function syncModels(): Promise<void> {
+  try {
+    await run("sync_models");
+  } catch (err) {
+    console.error("Failed to sync models:", err);
   }
 }
 

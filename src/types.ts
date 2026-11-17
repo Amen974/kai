@@ -47,9 +47,23 @@ export type ChatEvent =
     }
   | {
       type: "HistoryChanged";
+    }
+  | {
+      type: "ModelsChanged";
     };
 
 export type Conversation = {
   id: number;
   title: string;
+};
+
+export type ModelInfo = {
+  name: string;
+  family: string;
+  parameter_size: string;
+  quantization_level: string;
+  size_bytes: number;
+  modified_at: string;
+  supports_vision: boolean;
+  active: boolean;
 };
