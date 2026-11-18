@@ -72,15 +72,25 @@ pub async fn send_message(
     chat_session: State<'_, Mutex<ChatSession>>,
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<(), ChatError> {
-    let title_message = message.clone();
-    let is_new = chat_service::send(message, &chat_session, &pool, make_callback(app.clone())).await?;
+    let is_new = chat_service::send(
+        message.clone(),
+        &chat_session,
+        &pool,
+        make_callback(app.clone()),
+    )
+    .await?;
 
     if is_new {
         tauri::async_runtime::spawn(async move {
             let chat_session = app.state::<Mutex<ChatSession>>();
             let pool = app.state::<std::sync::Mutex<Connection>>();
-            let callback = make_callback(app.clone());
-            chat_service::title_if_missing(&chat_session, &pool, &title_message, &callback).await;
+            chat_service::title_if_missing(
+                &chat_session,
+                &pool,
+                &message,
+                &make_callback(app.clone()),
+            )
+            .await;
         });
     }
 
