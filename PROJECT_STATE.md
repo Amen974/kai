@@ -41,6 +41,7 @@ There are no automated tests in the project.
 - `database/migrations/001_initial_schema.sql`: `historys`, `branches`, `messages`.
 - `database/migrations/002_add_fts5.sql`: `history_fts5` virtual table plus triggers for history titles and `role = 'user'` messages.
 - `database/migrations/003_add_models.sql`: `models` table plus a partial unique index allowing only one `active` row.
+- `database/migrations/004_rename_historys.sql`: renames `historys` to `histories` and drops the unused `branches.name` column.
 - `ollama.rs`: `post_chat` (streaming `/api/chat`), `post_generate` (`/api/generate`, used for titles), `get_tags` (`/api/tags`), `show_model` (`/api/show`).
 
 ### Frontend — `src/`
@@ -62,7 +63,7 @@ There are no automated tests in the project.
 5. Components read only from the Zustand stores; UI-only state lives in `useUI`, backend-derived state in `useMessages`.
 
 ## Data model
-- `historys`: one row per conversation (`title`, `active_branch_id`, `created_at`, `updated_at`).
+- `histories`: one row per conversation (`title`, `active_branch_id`, `created_at`, `updated_at`).
 - `branches`: a conversation can have several; `parent_branch_id`, `fork_message_id`, `head_message_id` (head = last message in that branch).
 - `messages`: `history_id`, `branch_id`, `parent_message_id`, `role` (`user` | `assistant`), `content`, `thinking`, `created_at`.
 - `history_fts5`: FTS5 index over history titles and user-message content; used only by `search_history`.
@@ -77,17 +78,12 @@ There are no automated tests in the project.
 - New chat (`ctrl+n`), history overlay (`ctrl+h`) with arrow/Enter selection, two-step delete (`ctrl+Delete` / `ctrl+Backspace`).
 - Model picker (`ctrl+k`, keyboard only): overlay lists cached models with family, parameter size, quantization, disk size, modified date and `READS IMAGES` / `TEXT ONLY`, with the active model marked; Enter or click switches, `ctrl+r` re-syncs from Ollama. The catalog refetches only when the backend emits `models_changed`.
 - History search: debounced (150 ms) server-side FTS5 over titles and user messages.
-- Model catalog: `sync_models` loads models from Ollama `/api/tags`, checks the `vision` capability per model via `/api/show`, and stores the details in SQLite; `get_models` / `get_active_model` read the cache, `set_active_model` switches models. Chat and title generation use the active model, and `ModelPanel` drives all four commands.
+- Model catalog: `sync_models` loads models from Ollama `/api/tags`, checks the `vision` capability per model via `/api/show`, and stores the details in SQLite; `get_models` / `get_active_model` read the cache, `set_active_model` switches models. Chat and title generation use the active model, and `ModelPanel` drives all four commands. If the cache is empty, the first chat or title request syncs the catalog on demand and emits `models_changed`, so no manual refresh is needed.
+- Title generation for a new conversation runs in a detached task after `send_message` resolves; the title arrives through `history_changed`.
 - Session recovery on mount; branch selection persisted via `historys.active_branch_id`.
 - Assistant messages support markdown, syntax highlighting, copy, and collapsible thinking.
 - Frameless window (`decorations: false`) with drag region; ctrl+shift+m minimize, F11 fullscreen, ctrl+w close.
 
 ## Known issues / open points
 - Ollama base URL is hardcoded in `ollama.rs`; no settings.
-- If Ollama is unreachable on a fresh database, the table stays empty, the model panel shows its empty state, and chat fails with "no active model selected" until a sync succeeds (Refresh or `ctrl+r`).
-- `send_message` awaits title generation after the response finishes, so the command resolves only after the extra `/api/generate` request.
-- `repository::truncate_messages` is unused (`#[allow(dead_code)]`).
-- Errors are dropped in several places (`let _ = state.pop_last_assistant()`, `let _ = cancel_generation(...)` in `chat_service.rs`, `refreshVariants().catch(() => {})` in `store/messages.ts`), which conflicts with the "never swallow errors silently" rule.
-- `handleKeydown` special-cases a `/` key that no binding uses.
-- Tablename `historys` is a legacy spelling; `branches.name` is defined but unused.
 - No tests and no CI.

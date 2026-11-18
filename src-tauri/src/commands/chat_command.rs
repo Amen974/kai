@@ -1,6 +1,6 @@
 use rusqlite::Connection;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -72,7 +72,19 @@ pub async fn send_message(
     chat_session: State<'_, Mutex<ChatSession>>,
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<(), ChatError> {
-    chat_service::send(message, &chat_session, &pool, make_callback(app)).await
+    let title_message = message.clone();
+    let is_new = chat_service::send(message, &chat_session, &pool, make_callback(app.clone())).await?;
+
+    if is_new {
+        tauri::async_runtime::spawn(async move {
+            let chat_session = app.state::<Mutex<ChatSession>>();
+            let pool = app.state::<std::sync::Mutex<Connection>>();
+            let callback = make_callback(app.clone());
+            chat_service::title_if_missing(&chat_session, &pool, &title_message, &callback).await;
+        });
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -142,7 +154,8 @@ pub async fn delete_history(
 pub async fn cancel_generation(
     chat_session: State<'_, Mutex<ChatSession>>,
 ) -> Result<(), ChatError> {
-    chat_service::cancel_generation(&chat_session).await
+    chat_service::cancel_generation(&chat_session).await;
+    Ok(())
 }
 
 #[tauri::command]

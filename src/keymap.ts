@@ -325,8 +325,7 @@ export function handleKeydown(e: KeyboardEvent): boolean {
       (targetKey === "arrowup" && keyName === "ArrowUp") ||
       (targetKey === "arrowdown" && keyName === "ArrowDown") ||
       (targetKey === "arrowleft" && keyName === "ArrowLeft") ||
-      (targetKey === "arrowright" && keyName === "ArrowRight") ||
-      (targetKey === "/" && (keyName === "/" || keyName === "?"));
+      (targetKey === "arrowright" && keyName === "ArrowRight");
 
     if (
       keyMatches &&

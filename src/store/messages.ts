@@ -102,7 +102,9 @@ export const useMessages = create<ChatState>((set) => ({
   dispatch: (event: ChatEvent) => {
     set((state) => chatReducer(state, event));
     if (event.type === "Snapshot" || event.type === "GenerationFinished") {
-      refreshVariants().catch(() => {});
+      refreshVariants().catch((err) => {
+        console.error("Failed to refresh variants:", err);
+      });
     }
   },
   setError: (error: string | null) => set({ error }),
@@ -117,22 +119,18 @@ export async function fetchVariants(parentMessageId: number | null): Promise<voi
   if (historyId === null) return;
   const key = parentKey(parentMessageId);
 
-  try {
-    const variants = await run<MessageVariant[]>("get_variants", {
-      historyId,
-      parentMessageId,
-      history_id: historyId,
-      parent_message_id: parentMessageId,
-    });
-    useMessages.setState((state) => ({
-      variantsByParentId: {
-        ...state.variantsByParentId,
-        [key]: variants,
-      },
-    }));
-  } catch (err) {
-    console.error("Failed to load variants:", err);
-  }
+  const variants = await run<MessageVariant[]>("get_variants", {
+    historyId,
+    parentMessageId,
+    history_id: historyId,
+    parent_message_id: parentMessageId,
+  });
+  useMessages.setState((state) => ({
+    variantsByParentId: {
+      ...state.variantsByParentId,
+      [key]: variants,
+    },
+  }));
 }
 
 export async function refreshVariants(): Promise<void> {

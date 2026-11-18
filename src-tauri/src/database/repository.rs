@@ -10,7 +10,7 @@ pub fn create_history(pool: &std::sync::Mutex<Connection>) -> Result<u32, ChatEr
     let now = chrono::Utc::now().to_rfc3339();
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
     let id: u32 = conn.query_row(
-        "INSERT INTO historys (title, created_at, updated_at) VALUES (?1, ?2, ?3) RETURNING id",
+        "INSERT INTO histories (title, created_at, updated_at) VALUES (?1, ?2, ?3) RETURNING id",
         (&now, &now, &now),
         |row| row.get(0),
     )?;
@@ -21,7 +21,7 @@ pub fn touch_history(pool: &std::sync::Mutex<Connection>, id: u32) -> Result<(),
     let now = chrono::Utc::now().to_rfc3339();
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
     conn.execute(
-        "UPDATE historys SET updated_at = ?1 WHERE id = ?2",
+        "UPDATE histories SET updated_at = ?1 WHERE id = ?2",
         (&now, &id),
     )?;
     Ok(())
@@ -33,19 +33,19 @@ pub fn update_title(
     id: &u32,
 ) -> Result<(), ChatError> {
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
-    conn.execute("UPDATE historys SET title = ?1 WHERE id = ?2", (title, id))?;
+    conn.execute("UPDATE histories SET title = ?1 WHERE id = ?2", (title, id))?;
     Ok(())
 }
 
 pub fn delete_history(id: u32, pool: &std::sync::Mutex<Connection>) -> Result<(), ChatError> {
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
-    conn.execute("DELETE FROM historys WHERE id = ?1", [id])?;
+    conn.execute("DELETE FROM histories WHERE id = ?1", [id])?;
     Ok(())
 }
 
 pub fn get_history(pool: &std::sync::Mutex<Connection>) -> Result<Vec<GetHistory>, ChatError> {
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
-    let mut stmt = conn.prepare("SELECT id, title FROM historys ORDER BY updated_at DESC")?;
+    let mut stmt = conn.prepare("SELECT id, title FROM histories ORDER BY updated_at DESC")?;
     let rows = stmt.query_map([], |row| {
         Ok(GetHistory {
             id: row.get(0)?,
@@ -73,7 +73,7 @@ pub fn search_history(
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
     let mut stmt = conn.prepare(
         "SELECT h.id, h.title
-         FROM historys h
+         FROM histories h
          JOIN (
              SELECT history_id, MIN(rank) AS min_rank
              FROM history_fts5
@@ -117,7 +117,7 @@ pub fn set_active_branch(
 ) -> Result<(), ChatError> {
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
     conn.execute(
-        "UPDATE historys SET active_branch_id = ?1 WHERE id = ?2",
+        "UPDATE histories SET active_branch_id = ?1 WHERE id = ?2",
         [branch_id, history_id],
     )?;
     Ok(())
@@ -129,7 +129,7 @@ pub fn get_active_branch(
 ) -> Result<u32, ChatError> {
     let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
     let active_branch_id: u32 = conn.query_row(
-        "SELECT active_branch_id FROM historys WHERE id = ?1",
+        "SELECT active_branch_id FROM histories WHERE id = ?1",
         [history_id],
         |row| row.get(0),
     )?;
@@ -359,24 +359,4 @@ pub fn set_active_model(
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn truncate_messages(
-    pool: &std::sync::Mutex<Connection>,
-    history_id: u32,
-    branch_id: u32,
-    keep_count: usize,
-) -> Result<(), ChatError> {
-    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
-    conn.execute(
-        "DELETE FROM messages
-         WHERE history_id = ?1 AND branch_id = ?2
-           AND id NOT IN (
-               SELECT id FROM messages
-               WHERE history_id = ?1 AND branch_id = ?2
-               ORDER BY id ASC
-               LIMIT ?3
-           )",
-        rusqlite::params![history_id, branch_id, keep_count as i64],
-    )?;
-    Ok(())
-}
+
