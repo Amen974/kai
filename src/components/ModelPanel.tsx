@@ -36,7 +36,7 @@ const ModelPanel = () => {
           className="overflow-y-auto no-scrollbar flex-1 outline-none"
         >
           {models.length === 0 ? (
-            <li className="px-6 py-4 text-sm tracking-wide opacity-50">No models.</li>
+            <li className="px-6 py-4 text-sm tracking-wide opacity-50">No models</li>
           ) : (
             models.map((model, idx) => {
               const isSelected = selectedIndex === idx;
@@ -71,15 +71,24 @@ const ModelPanel = () => {
                     </div>
                   </div>
 
-                  <span
-                    className={`shrink-0 font-mono text-[0.6rem] tracking-[0.15em] ${
-                      model.supports_vision
-                        ? "text-(--color-text-secondary)"
-                        : "text-(--color-text-muted)"
-                    }`}
-                  >
-                    {model.supports_vision ? "READS IMAGES" : "TEXT ONLY"}
-                  </span>
+                  {model.supports_vision && (
+                    <svg
+                      role="img"
+                      aria-label="Supports images"
+                      viewBox="0 0 24 24"
+                      className="size-3.5 shrink-0 text-(--color-text-secondary)"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M2.46 12C3.73 7.94 7.52 5 12 5s8.27 2.94 9.54 7c-1.27 4.06-5.06 7-9.54 7s-8.27-2.94-9.54-7Z"
+                      />
+                      <circle cx="12" cy="12" r="2.75" />
+                    </svg>
+                  )}
                 </li>
               );
             })

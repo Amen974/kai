@@ -38,15 +38,9 @@ const DownloadPanel = () => {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Model name, e.g. qwen3:8b"
+            placeholder="Model name"
             className="w-full bg-transparent outline-none text-sm tracking-wide placeholder:text-(--color-text-muted)"
           />
-        </div>
-
-        <div className="px-6 py-3 text-xs tracking-wide text-(--color-text-muted)">
-          {download
-            ? "ctrl+s to cancel the download."
-            : "Enter to download from the Ollama registry."}
         </div>
 
         {download && (
@@ -62,8 +56,7 @@ const DownloadPanel = () => {
             </div>
             {download.total > 0 && (
               <div className="mt-1 font-mono text-[0.6rem] tracking-widest text-(--color-text-muted)">
-                {download.status} · {formatSize(download.completed)} /{" "}
-                {formatSize(download.total)}
+                {formatSize(download.completed)} / {formatSize(download.total)}
               </div>
             )}
           </div>

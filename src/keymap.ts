@@ -151,6 +151,7 @@ export const keymap: KeyBinding[] = [
           overlay: "history",
           historyIndex: idx >= 0 ? idx : 0,
           historyArmedId: null,
+          historySearchQuery: "",
         });
       }
     },

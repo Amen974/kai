@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { run, useMessages } from "../store/messages";
 import { useUI } from "../store/ui";
 import { Conversation, SessionSnapshot } from "../types";
@@ -18,60 +18,49 @@ const HistoryPanel = () => {
 
   const itemRefs = useRef<(HTMLLIElement | null)[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [hasAnyHistory, setHasAnyHistory] = useState(
-    () => useUI.getState().historyList.length > 0
-  );
-
-  const fetchHistory = async () => {
-    try {
-      const result = await run<Conversation[]>("get_history");
-      useUI.getState().setHistoryList(result);
-      setHasAnyHistory(result.length > 0);
-    } catch (error) {
-      console.error("Failed to fetch history:", error);
-    }
-  };
 
   useEffect(() => {
-    fetchHistory();
-  }, [historyVersion]);
-
-  useEffect(() => {
-    if (isOpen) {
-      useUI.getState().setHistoryArmedId(null);
-      setSearchQuery("");
-      fetchHistory().then(() => {
-        const currentList = useUI.getState().historyList;
-        if (currentList.length > 0) {
-          const idx = currentList.findIndex((c) => c.id === historyId);
-          useUI.getState().setHistoryIndex(idx >= 0 ? idx : 0);
-        }
+    run<Conversation[]>("get_history")
+      .then((result) => useUI.getState().setHistoryList(result))
+      .catch((error) => {
+        console.error("Failed to fetch history:", error);
       });
-    }
-  }, [isOpen]);
+  }, [historyVersion]);
 
   useEffect(() => {
     if (!isOpen) return;
 
-    const timer = setTimeout(async () => {
-      const trimmed = searchQuery.trim();
-      try {
-        if (!trimmed) {
-          const result = await run<Conversation[]>("get_history");
-          useUI.getState().setHistoryList(result);
-          setHasAnyHistory(result.length > 0);
-        } else {
-          const result = await run<Conversation[]>("search_history", { query: trimmed });
-          useUI.getState().setHistoryList(result);
+    const idx = useUI
+      .getState()
+      .historyList.findIndex((c) => c.id === historyId);
+    useUI.getState().setHistoryIndex(idx >= 0 ? idx : 0);
+  }, [isOpen, historyId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const trimmed = searchQuery.trim();
+    let cancelled = false;
+
+    run<Conversation[]>(
+      trimmed ? "search_history" : "get_history",
+      trimmed ? { query: trimmed } : undefined
+    )
+      .then((result) => {
+        if (cancelled) return;
+        useUI.getState().setHistoryList(result);
+        if (trimmed) {
           useUI.getState().setHistoryIndex(0);
         }
-      } catch (error) {
+      })
+      .catch((error) => {
         console.error("Failed to search history:", error);
-      }
-    }, 150);
+      });
 
-    return () => clearTimeout(timer);
-  }, [searchQuery, isOpen]);
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, searchQuery]);
 
   useEffect(() => {
     if (isOpen && itemRefs.current[selectedIndex]) {
@@ -102,14 +91,14 @@ const HistoryPanel = () => {
       />
 
       <div className="panel-card relative w-[50vw] max-h-[60vh] flex flex-col z-layer-modal overflow-hidden">
-        {(hasAnyHistory || history.length > 0) && (
+        {history.length > 0 && (
           <div className="flex items-center px-6 py-3 border-b border-(--color-border)">
             <input
               ref={searchInputRef}
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search history or messages..."
+              placeholder="Search"
               className="w-full bg-transparent outline-none text-sm tracking-wide placeholder:text-(--color-text-muted)"
             />
             {searchQuery && (
@@ -131,9 +120,7 @@ const HistoryPanel = () => {
         >
           {history.length === 0 ? (
             <li className="px-6 py-4 text-sm tracking-wide opacity-50">
-              {searchQuery.trim()
-                ? "No matching conversations."
-                : "No history yet."}
+              {searchQuery.trim() ? "No results" : "No history"}
             </li>
           ) : (
             history.map((conv, idx) => {
@@ -162,7 +149,7 @@ const HistoryPanel = () => {
                   </span>
                   {isArmed && (
                     <span className="text-xs text-(--color-error) tracking-wider font-mono shrink-0 ml-3 animate-pulse">
-                      Delete again to confirm
+                      Confirm
                     </span>
                   )}
                 </li>

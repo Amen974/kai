@@ -137,7 +137,7 @@ const InputBar = ({ isHome }: InputBarProps) => {
               }
             }}
             className="no-scrollbar overflow-y-auto max-h-50 resize-none outline-none text-base leading-6 tracking-widest placeholder:text-(--color-text-muted) w-full field-sizing-content"
-            placeholder={isEdit ? "Edit message..." : "Type something..."}
+            placeholder={isEdit ? "Edit message" : undefined}
           />
         </div>
       </div>

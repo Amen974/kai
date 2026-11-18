@@ -79,9 +79,9 @@ export const MessageView = React.memo(function MessageView({
       )}
 
       {hasContent && (
-        <div className="markdown-content">
+        <div className="markdown-content group">
           <MarkdownMessage content={message.content} />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
             <Copy text={message.content} />
           </div>
         </div>
