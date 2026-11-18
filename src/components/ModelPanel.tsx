@@ -1,8 +1,7 @@
 import { useEffect, useRef } from "react";
 import { loadModels, selectModel, useMessages } from "../store/messages";
 import { useUI } from "../store/ui";
-
-const formatSize = (bytes: number) => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+import { formatSize } from "../format";
 
 const ModelPanel = () => {
   const isOpen = useUI((state) => state.overlay === "models");
