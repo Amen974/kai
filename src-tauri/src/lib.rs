@@ -9,7 +9,8 @@ use crate::commands::chat_command::{
 };
 use crate::models::chat_event::ChatEvent;
 use crate::commands::model_command::{
-    download_model, get_active_model, get_models, set_active_model, sync_models,
+    cancel_model_download, delete_model, download_model, get_active_model, get_models,
+    set_active_model, sync_models,
 };
 use crate::services::model_service;
 use crate::state::ChatSession;
@@ -46,6 +47,7 @@ pub fn run() {
             active: None,
             next_generation_id: 0,
             active_branch_id: None,
+            download: None,
         }))
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -66,6 +68,8 @@ pub fn run() {
             get_active_model,
             set_active_model,
             download_model,
+            cancel_model_download,
+            delete_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,7 +1,8 @@
 use futures_util::StreamExt;
 use reqwest::Response;
+use tokio_util::sync::CancellationToken;
 
-use crate::models::{ai_model::{OllamaPullProgress, OllamaPullRequest, OllamaShowRequest, OllamaShowResponse, OllamaTagsResponse}, chat_model::{OllamaGenerateResponse, OllamaRequest, OllamaRequestGenerate}, error_model::ChatError};
+use crate::models::{ai_model::{OllamaDeleteRequest, OllamaPullProgress, OllamaPullRequest, OllamaShowRequest, OllamaShowResponse, OllamaTagsResponse}, chat_model::{OllamaGenerateResponse, OllamaRequest, OllamaRequestGenerate}, error_model::ChatError};
 
 
 pub async fn post_chat(payload: OllamaRequest) -> Result<Response, ChatError> {
@@ -50,7 +51,31 @@ pub async fn show_model(name: &str) -> Result<OllamaShowResponse, ChatError> {
     return Ok(data);
 }
 
-pub async fn pull_model<F>(name: &str, mut on_progress: F) -> Result<(), ChatError>
+fn report_pull_line<F>(line: &str, on_progress: &mut F) -> Result<bool, ChatError>
+where
+    F: FnMut(OllamaPullProgress),
+{
+    let line = line.trim();
+    if line.is_empty() {
+        return Ok(false);
+    }
+
+    let mut progress: OllamaPullProgress = serde_json::from_str(line)?;
+    if let Some(error) = progress.error.take() {
+        return Err(ChatError::ModelDownloadFailed(error));
+    }
+
+    let succeeded = progress.status == "success";
+    on_progress(progress);
+
+    Ok(succeeded)
+}
+
+pub async fn pull_model<F>(
+    name: &str,
+    cancel: &CancellationToken,
+    mut on_progress: F,
+) -> Result<bool, ChatError>
 where
     F: FnMut(OllamaPullProgress),
 {
@@ -75,26 +100,52 @@ where
     }
 
     let mut buffer: Vec<u8> = Vec::new();
-    let mut stream = response.bytes_stream();
+    let mut stream = Box::pin(response.bytes_stream());
+    let mut succeeded = false;
 
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            chunk = stream.next() => chunk,
+            _ = cancel.cancelled() => return Ok(false),
+        };
+
+        let Some(chunk) = chunk else {
+            break;
+        };
+
         buffer.extend_from_slice(&chunk?);
 
         while let Some(end) = buffer.iter().position(|byte| *byte == b'\n') {
             let line = String::from_utf8(buffer.drain(..=end).collect::<Vec<u8>>())?;
-
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            let mut progress: OllamaPullProgress = serde_json::from_str(&line)?;
-            if let Some(error) = progress.error.take() {
-                return Err(ChatError::ModelDownloadFailed(error));
-            }
-
-            on_progress(progress);
+            succeeded |= report_pull_line(&line, &mut on_progress)?;
         }
     }
+
+    let tail = String::from_utf8(buffer)?;
+    succeeded |= report_pull_line(&tail, &mut on_progress)?;
+
+    if !succeeded {
+        return Err(ChatError::ModelDownloadFailed(
+            "connection closed before the download finished".to_string(),
+        ));
+    }
+
+    Ok(true)
+}
+
+pub async fn delete_model(name: &str) -> Result<(), ChatError> {
+    let client = reqwest::Client::new();
+
+    let payload = OllamaDeleteRequest {
+        model: name.to_string(),
+    };
+
+    client
+        .delete("http://localhost:11434/api/delete")
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
 
     Ok(())
 }

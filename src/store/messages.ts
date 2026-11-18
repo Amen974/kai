@@ -105,12 +105,6 @@ export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatSta
         },
       };
     }
-
-    case "ModelDownloadFinished": {
-      return {
-        download: null,
-      };
-    }
   }
 }
 
@@ -219,12 +213,24 @@ export async function downloadModel(query: string): Promise<void> {
 
   useMessages.setState({
     download: { name, status: "starting", completed: 0, total: 0 },
+    error: null,
   });
 
   try {
     await run("download_model", { name });
+    useMessages.setState({ download: null });
   } catch {
     useMessages.setState({ download: null });
+  }
+}
+
+export async function cancelDownload(): Promise<void> {
+  if (!useMessages.getState().download) return;
+
+  try {
+    await run("cancel_model_download");
+  } catch (err) {
+    console.error("Failed to cancel model download:", err);
   }
 }
 

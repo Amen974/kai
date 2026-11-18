@@ -15,6 +15,7 @@ pub struct ChatSession  {
     pub(crate) active: Option<ActiveStream>,
     pub(crate) next_generation_id: u32,
     pub(crate) active_branch_id: Option<u32>,
+    pub(crate) download: Option<CancellationToken>,
 }
 
 impl ChatSession {
@@ -34,6 +35,21 @@ impl ChatSession {
         });
 
         Ok((generation_id, token))
+    }
+
+    pub fn begin_download(&mut self) -> Result<CancellationToken, ChatError> {
+        if self.download.is_some() {
+            return Err(ChatError::DownloadActive);
+        }
+
+        let token = CancellationToken::new();
+        self.download = Some(token.clone());
+
+        Ok(token)
+    }
+
+    pub fn end_download(&mut self) {
+        self.download = None;
     }
 
     pub fn end_generation(&mut self, generation_id: u32) {

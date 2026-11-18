@@ -33,6 +33,9 @@ pub enum ChatError {
     #[error("failed to download model: {0}")]
     ModelDownloadFailed(String),
 
+    #[error("a model download is active")]
+    DownloadActive,
+
     #[error(transparent)]
     Db(#[from] rusqlite::Error),
 

@@ -51,10 +51,7 @@ export type ChatEvent =
   | {
       type: "ModelsChanged";
     }
-  | ({ type: "ModelDownloadProgress" } & DownloadProgress)
-  | {
-      type: "ModelDownloadFinished";
-    };
+  | ({ type: "ModelDownloadProgress" } & DownloadProgress);
 
 export type Conversation = {
   id: number;

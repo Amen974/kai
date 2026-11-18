@@ -1,11 +1,13 @@
 use rusqlite::Connection;
 use tauri::{AppHandle, State};
+use tokio::sync::Mutex;
 
 use crate::{
     commands::chat_command::emit_chat_event,
     database::repository,
     models::{ai_model::AiModel, chat_event::ChatEvent, error_model::ChatError},
     services::model_service,
+    state::ChatSession,
 };
 
 #[tauri::command]
@@ -22,9 +24,33 @@ pub async fn sync_models(
 pub async fn download_model(
     app: AppHandle,
     name: String,
+    chat_session: State<'_, Mutex<ChatSession>>,
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<(), ChatError> {
-    model_service::download_model(&pool, &name, |event| emit_chat_event(&app, event)).await
+    model_service::download_model(&chat_session, &pool, &name, |event| {
+        emit_chat_event(&app, event)
+    })
+    .await?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cancel_model_download(
+    chat_session: State<'_, Mutex<ChatSession>>,
+) -> Result<(), ChatError> {
+    model_service::cancel_download(&chat_session).await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_model(
+    app: AppHandle,
+    name: String,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<(), ChatError> {
+    model_service::delete_model(&pool, &name).await?;
+    emit_chat_event(&app, ChatEvent::ModelsChanged);
+    Ok(())
 }
 
 #[tauri::command]

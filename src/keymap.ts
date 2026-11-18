@@ -1,5 +1,5 @@
 import { useUI, UILayer, getActiveLayer } from "./store/ui";
-import { useMessages, run, selectModel, syncModels, downloadModel } from "./store/messages";
+import { useMessages, run, selectModel, syncModels, downloadModel, cancelDownload } from "./store/messages";
 import { SessionSnapshot } from "./types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -269,6 +269,13 @@ export const keymap: KeyBinding[] = [
     layers: ["downloads"],
     run: async () => {
       await downloadModel(useUI.getState().downloadQuery);
+    },
+  },
+  {
+    keys: "ctrl+s",
+    layers: ["downloads"],
+    run: async () => {
+      await cancelDownload();
     },
   },
 ];

@@ -1,9 +1,11 @@
 use rusqlite::Connection;
+use tokio::sync::Mutex;
 
 use crate::{
     database::repository,
     models::{ai_model::AiModel, chat_event::ChatEvent, error_model::ChatError},
-    ollama::{get_tags, pull_model, show_model},
+    ollama::{delete_model as ollama_delete_model, get_tags, pull_model, show_model},
+    state::ChatSession,
 };
 
 pub async fn sync_models(pool: &std::sync::Mutex<Connection>) -> Result<(), ChatError> {
@@ -49,11 +51,14 @@ pub async fn sync_if_empty(pool: &std::sync::Mutex<Connection>) -> Result<bool, 
 }
 
 pub async fn download_model(
+    session: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
     name: &str,
     on_event: impl Fn(ChatEvent),
-) -> Result<(), ChatError> {
-    pull_model(name, |progress| {
+) -> Result<bool, ChatError> {
+    let token = session.lock().await.begin_download()?;
+
+    let pulled = pull_model(name, &token, |progress| {
         on_event(ChatEvent::ModelDownloadProgress {
             name: name.to_string(),
             status: progress.status,
@@ -61,13 +66,33 @@ pub async fn download_model(
             total: progress.total,
         });
     })
-    .await?;
+    .await;
+
+    session.lock().await.end_download();
+
+    if !pulled? {
+        return Ok(false);
+    }
 
     sync_models(pool).await?;
     on_event(ChatEvent::ModelsChanged);
-    on_event(ChatEvent::ModelDownloadFinished);
 
-    Ok(())
+    Ok(true)
+}
+
+pub async fn cancel_download(session: &Mutex<ChatSession>) {
+    let state = session.lock().await;
+    if let Some(token) = &state.download {
+        token.cancel();
+    }
+}
+
+pub async fn delete_model(
+    pool: &std::sync::Mutex<Connection>,
+    name: &str,
+) -> Result<(), ChatError> {
+    ollama_delete_model(name).await?;
+    sync_models(pool).await
 }
 
 pub fn active_model(pool: &std::sync::Mutex<Connection>) -> Result<Option<AiModel>, ChatError> {

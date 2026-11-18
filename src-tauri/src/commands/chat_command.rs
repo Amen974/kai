@@ -75,9 +75,6 @@ pub(crate) fn emit_chat_event(app: &AppHandle, event: ChatEvent) {
                 }),
             );
         }
-        ChatEvent::ModelDownloadFinished => {
-            emit_event(app, "model_download_finished", ());
-        }
     }
 }
 

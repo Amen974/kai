@@ -49,6 +49,11 @@ pub struct OllamaPullRequest {
     pub(crate) model: String,
 }
 
+#[derive(serde::Serialize)]
+pub struct OllamaDeleteRequest {
+    pub(crate) model: String,
+}
+
 #[derive(serde::Deserialize)]
 pub struct OllamaPullProgress {
     #[serde(default)]

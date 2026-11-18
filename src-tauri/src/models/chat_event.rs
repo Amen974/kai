@@ -38,6 +38,4 @@ pub enum ChatEvent {
         completed: u64,
         total: u64,
     },
-
-    ModelDownloadFinished,
 }

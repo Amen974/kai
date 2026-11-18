@@ -78,11 +78,6 @@ export async function setupChatEventListener(): Promise<() => void> {
   );
   unlistens.push(unlistenDownloadProgress);
 
-  const unlistenDownloadFinished = await listen<void>("model_download_finished", () => {
-    dispatch({ type: "ModelDownloadFinished" });
-  });
-  unlistens.push(unlistenDownloadFinished);
-
   return () => {
     for (const unlisten of unlistens) {
       unlisten();

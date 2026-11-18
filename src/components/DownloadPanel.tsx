@@ -44,7 +44,9 @@ const DownloadPanel = () => {
         </div>
 
         <div className="px-6 py-3 text-xs tracking-wide text-(--color-text-muted)">
-          Enter to download from the Ollama registry.
+          {download
+            ? "ctrl+s to cancel the download."
+            : "Enter to download from the Ollama registry."}
         </div>
 
         {download && (
