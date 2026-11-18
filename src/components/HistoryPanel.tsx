@@ -91,7 +91,7 @@ const HistoryPanel = () => {
       />
 
       <div className="panel-card relative w-[50vw] max-h-[60vh] flex flex-col z-layer-modal overflow-hidden">
-        {history.length > 0 && (
+        {(history.length > 0 || searchQuery.trim().length > 0) && (
           <div className="flex items-center px-6 py-3 border-b border-(--color-border)">
             <input
               ref={searchInputRef}
