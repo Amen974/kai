@@ -26,10 +26,10 @@ There are no automated tests in the project.
 ## Structure
 
 ### Backend — `src-tauri/src/`
-- `lib.rs`: composition root. Initializes the DB pool, manages `Mutex<ChatSession>`, registers all 16 commands, and syncs the model catalog from Ollama on startup when the `models` table is empty (emitting `models_changed` when it did).
+- `lib.rs`: composition root. Initializes the DB pool, manages `Mutex<ChatSession>`, registers all 17 commands, and syncs the model catalog from Ollama on startup when the `models` table is empty (emitting `models_changed` when it did).
 - `commands/chat_command.rs`: Tauri boundary (the only layer with `AppHandle`). Commands: `send_message`, `resend_message`, `edit_message`, `load_chat`, `switch_branch`, `get_variants`, `new_chat`, `delete_history`, `cancel_generation`, `get_session`, `get_history`, `search_history`. Also maps `ChatEvent` to Tauri events.
-- `commands/model_command.rs`: model catalog commands: `sync_models`, `get_models`, `get_active_model`, `set_active_model`. `sync_models` and `set_active_model` emit `models_changed`.
-- `services/model_service.rs`: all model catalog logic — fetches `/api/tags` plus `/api/show` for each model (vision check), caches the result in the `models` table, preserves or falls back the active selection,   and resolves the active model for generation. `sync_if_empty` reports whether it had to sync.
+- `commands/model_command.rs`: model catalog commands: `sync_models`, `download_model`, `get_models`, `get_active_model`, `set_active_model`. `sync_models`, `download_model` and `set_active_model` emit `models_changed`.
+- `services/model_service.rs`: all model catalog logic — fetches `/api/tags` plus `/api/show` for each model (vision check), caches the result in the `models` table, preserves or falls back the active selection,   and resolves the active model for generation. `sync_if_empty` reports whether it had to sync. `download_model` pulls a model through Ollama, then re-syncs the catalog.
 - `services/chat_service.rs`: all chat logic — persisting the user message, creating history/branches, streaming Ollama output, finalizing/cancelling generation, edit-as-fork, title generation.
 - `state.rs`: `ChatSession` — in-memory source of truth (`history_id`, `messages`, `active` stream + cancellation token, `next_generation_id`, `active_branch_id`) with `begin_generation`, `end_generation`, `push_user`, `push_assistant_placeholder`, `append_content`, `append_thinking`, `pop_last_assistant`, `truncate`, `replace`, `reset`, `snapshot`.
 - `models/ai_model.rs`: `AiModel` (stored model details + `supports_vision` + `active`) and Ollama `/api/tags` / `/api/show` payload types.
@@ -42,7 +42,7 @@ There are no automated tests in the project.
 - `database/migrations/002_add_fts5.sql`: `history_fts5` virtual table plus triggers for history titles and `role = 'user'` messages.
 - `database/migrations/003_add_models.sql`: `models` table plus a partial unique index allowing only one `active` row.
 - `database/migrations/004_rename_historys.sql`: renames `historys` to `histories` and drops the unused `branches.name` column.
-- `ollama.rs`: `post_chat` (streaming `/api/chat`), `post_generate` (`/api/generate`, used for titles), `get_tags` (`/api/tags`), `show_model` (`/api/show`).
+- `ollama.rs`: `post_chat` (streaming `/api/chat`), `post_generate` (`/api/generate`, used for titles), `get_tags` (`/api/tags`), `show_model` (`/api/show`), `pull_model` (`/api/pull`, non-streaming; an `error` field becomes `ChatError::ModelDownloadFailed`).
 
 ### Frontend — `src/`
 - `App.tsx`: shell. Installs keymap + chat event listener, recovers session with `get_session`, renders `Home` when `messages.length === 0` and `Chat` otherwise, plus `InputBar`, `HistoryPanel`, `SideLabels`.
@@ -78,7 +78,7 @@ There are no automated tests in the project.
 - New chat (`ctrl+n`), history overlay (`ctrl+h`) with arrow/Enter selection, two-step delete (`ctrl+Delete` / `ctrl+Backspace`).
 - Model picker (`ctrl+k`, keyboard only): overlay lists cached models with family, parameter size, quantization, disk size, modified date and `READS IMAGES` / `TEXT ONLY`, with the active model marked; Enter or click switches, `ctrl+r` re-syncs from Ollama. The catalog refetches only when the backend emits `models_changed`.
 - History search: debounced (150 ms) server-side FTS5 over titles and user messages.
-- Model catalog: `sync_models` loads models from Ollama `/api/tags`, checks the `vision` capability per model via `/api/show`, and stores the details in SQLite; `get_models` / `get_active_model` read the cache, `set_active_model` switches models. Chat and title generation use the active model, and `ModelPanel` drives all four commands. If the cache is empty, the first chat request syncs the catalog on demand and emits `models_changed`, so no manual refresh is needed.
+- Model catalog: `sync_models` loads models from Ollama `/api/tags`, checks the `vision` capability per model via `/api/show`, and stores the details in SQLite; `get_models` / `get_active_model` read the cache, `set_active_model` switches models. `download_model` pulls any Ollama model by name and re-syncs the catalog (backend only, no UI caller yet). Chat and title generation use the active model, and `ModelPanel` drives all four commands. If the cache is empty, the first chat request syncs the catalog on demand and emits `models_changed`, so no manual refresh is needed.
 - Title generation for a new conversation runs in a detached task after `send_message` resolves; the title arrives through `history_changed`.
 - Session recovery on mount; branch selection persisted via `historys.active_branch_id`.
 - Assistant messages support markdown, syntax highlighting, copy, and collapsible thinking.

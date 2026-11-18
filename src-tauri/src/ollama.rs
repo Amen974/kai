@@ -1,6 +1,6 @@
 use reqwest::Response;
 
-use crate::models::{ai_model::{OllamaShowRequest, OllamaShowResponse, OllamaTagsResponse}, chat_model::{OllamaGenerateResponse, OllamaRequest, OllamaRequestGenerate}, error_model::ChatError};
+use crate::models::{ai_model::{OllamaPullRequest, OllamaPullResponse, OllamaShowRequest, OllamaShowResponse, OllamaTagsResponse}, chat_model::{OllamaGenerateResponse, OllamaRequest, OllamaRequestGenerate}, error_model::ChatError};
 
 
 pub async fn post_chat(payload: OllamaRequest) -> Result<Response, ChatError> {
@@ -47,6 +47,29 @@ pub async fn show_model(name: &str) -> Result<OllamaShowResponse, ChatError> {
     let data: OllamaShowResponse = response.json().await?;
 
     return Ok(data);
+}
+
+pub async fn pull_model(name: &str) -> Result<(), ChatError> {
+    let client = reqwest::Client::new();
+
+    let payload = OllamaPullRequest {
+        model: name.to_string(),
+        stream: false,
+    };
+
+    let response = client
+        .post("http://localhost:11434/api/pull")
+        .json(&payload)
+        .send()
+        .await?;
+
+    let data: OllamaPullResponse = response.json().await?;
+
+    if let Some(error) = data.error {
+        return Err(ChatError::ModelDownloadFailed(error));
+    }
+
+    Ok(())
 }
 
 pub async fn post_generate(payload: OllamaRequestGenerate) -> Result<String, ChatError> {

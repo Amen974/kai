@@ -8,7 +8,9 @@ use crate::commands::chat_command::{
     switch_branch,
 };
 use crate::models::chat_event::ChatEvent;
-use crate::commands::model_command::{get_active_model, get_models, set_active_model, sync_models};
+use crate::commands::model_command::{
+    download_model, get_active_model, get_models, set_active_model, sync_models,
+};
 use crate::services::model_service;
 use crate::state::ChatSession;
 
@@ -63,6 +65,7 @@ pub fn run() {
             get_models,
             get_active_model,
             set_active_model,
+            download_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -19,6 +19,17 @@ pub async fn sync_models(
 }
 
 #[tauri::command]
+pub async fn download_model(
+    app: AppHandle,
+    name: String,
+    pool: State<'_, std::sync::Mutex<Connection>>,
+) -> Result<(), ChatError> {
+    model_service::download_model(&pool, &name).await?;
+    emit_chat_event(&app, ChatEvent::ModelsChanged);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn get_models(
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<Vec<AiModel>, ChatError> {

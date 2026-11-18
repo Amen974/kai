@@ -43,3 +43,15 @@ pub struct OllamaShowResponse {
     #[serde(default)]
     pub(crate) capabilities: Vec<String>,
 }
+
+#[derive(serde::Serialize)]
+pub struct OllamaPullRequest {
+    pub(crate) model: String,
+    pub(crate) stream: bool,
+}
+
+#[derive(serde::Deserialize)]
+pub struct OllamaPullResponse {
+    #[serde(default)]
+    pub(crate) error: Option<String>,
+}
