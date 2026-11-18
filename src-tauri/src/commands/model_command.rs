@@ -24,9 +24,7 @@ pub async fn download_model(
     name: String,
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<(), ChatError> {
-    model_service::download_model(&pool, &name).await?;
-    emit_chat_event(&app, ChatEvent::ModelsChanged);
-    Ok(())
+    model_service::download_model(&pool, &name, |event| emit_chat_event(&app, event)).await
 }
 
 #[tauri::command]

@@ -47,11 +47,16 @@ pub struct OllamaShowResponse {
 #[derive(serde::Serialize)]
 pub struct OllamaPullRequest {
     pub(crate) model: String,
-    pub(crate) stream: bool,
 }
 
 #[derive(serde::Deserialize)]
-pub struct OllamaPullResponse {
+pub struct OllamaPullProgress {
+    #[serde(default)]
+    pub(crate) status: String,
+    #[serde(default)]
+    pub(crate) completed: u64,
+    #[serde(default)]
+    pub(crate) total: u64,
     #[serde(default)]
     pub(crate) error: Option<String>,
 }

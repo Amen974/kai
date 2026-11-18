@@ -1,5 +1,5 @@
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { ChatEvent, SessionSnapshot } from "../types";
+import { ChatEvent, DownloadProgress, SessionSnapshot } from "../types";
 import { useMessages } from "../store/messages";
 
 export async function setupChatEventListener(): Promise<() => void> {
@@ -66,6 +66,22 @@ export async function setupChatEventListener(): Promise<() => void> {
     });
   });
   unlistens.push(unlistenModels);
+
+  const unlistenDownloadProgress = await listen<DownloadProgress>(
+    "model_download_progress",
+    (event) => {
+      dispatch({
+        type: "ModelDownloadProgress",
+        ...event.payload,
+      });
+    }
+  );
+  unlistens.push(unlistenDownloadProgress);
+
+  const unlistenDownloadFinished = await listen<void>("model_download_finished", () => {
+    dispatch({ type: "ModelDownloadFinished" });
+  });
+  unlistens.push(unlistenDownloadFinished);
 
   return () => {
     for (const unlisten of unlistens) {

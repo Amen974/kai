@@ -229,13 +229,9 @@ async fn finalize_generation(
         StopReason::Cancelled => {
             let has_content = {
                 let mut state = session_mutex.lock().await;
-                let branch_id = state.active_branch_id.ok_or(ChatError::NoActiveBranch)?;
                 if let Some(last) = state.messages.last() {
                     if matches!(last.role, Assistant) && last.content.is_empty() {
                         state.pop_last_assistant()?;
-                        if let Some(hid) = state.history_id {
-                            delete_last_message(pool, hid, branch_id)?;
-                        }
                         false
                     } else {
                         true
@@ -268,13 +264,9 @@ async fn finalize_generation(
         StopReason::Eof => {
             let has_content = {
                 let mut state = session_mutex.lock().await;
-                let branch_id = state.active_branch_id.ok_or(ChatError::NoActiveBranch)?;
                 if let Some(last) = state.messages.last() {
                     if matches!(last.role, Assistant) && last.content.is_empty() {
                         state.pop_last_assistant()?;
-                        if let Some(hid) = state.history_id {
-                            delete_last_message(pool, hid, branch_id)?;
-                        }
                         false
                     } else {
                         true

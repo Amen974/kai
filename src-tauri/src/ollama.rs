@@ -1,6 +1,7 @@
+use futures_util::StreamExt;
 use reqwest::Response;
 
-use crate::models::{ai_model::{OllamaPullRequest, OllamaPullResponse, OllamaShowRequest, OllamaShowResponse, OllamaTagsResponse}, chat_model::{OllamaGenerateResponse, OllamaRequest, OllamaRequestGenerate}, error_model::ChatError};
+use crate::models::{ai_model::{OllamaPullProgress, OllamaPullRequest, OllamaShowRequest, OllamaShowResponse, OllamaTagsResponse}, chat_model::{OllamaGenerateResponse, OllamaRequest, OllamaRequestGenerate}, error_model::ChatError};
 
 
 pub async fn post_chat(payload: OllamaRequest) -> Result<Response, ChatError> {
@@ -49,12 +50,14 @@ pub async fn show_model(name: &str) -> Result<OllamaShowResponse, ChatError> {
     return Ok(data);
 }
 
-pub async fn pull_model(name: &str) -> Result<(), ChatError> {
+pub async fn pull_model<F>(name: &str, mut on_progress: F) -> Result<(), ChatError>
+where
+    F: FnMut(OllamaPullProgress),
+{
     let client = reqwest::Client::new();
 
     let payload = OllamaPullRequest {
         model: name.to_string(),
-        stream: false,
     };
 
     let response = client
@@ -63,10 +66,34 @@ pub async fn pull_model(name: &str) -> Result<(), ChatError> {
         .send()
         .await?;
 
-    let data: OllamaPullResponse = response.json().await?;
+    let status = response.status();
+    if !status.is_success() {
+        let data: OllamaPullProgress = response.json().await?;
+        return Err(ChatError::ModelDownloadFailed(
+            data.error.unwrap_or_else(|| format!("HTTP {status}")),
+        ));
+    }
 
-    if let Some(error) = data.error {
-        return Err(ChatError::ModelDownloadFailed(error));
+    let mut buffer: Vec<u8> = Vec::new();
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        buffer.extend_from_slice(&chunk?);
+
+        while let Some(end) = buffer.iter().position(|byte| *byte == b'\n') {
+            let line = String::from_utf8(buffer.drain(..=end).collect::<Vec<u8>>())?;
+
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let mut progress: OllamaPullProgress = serde_json::from_str(&line)?;
+            if let Some(error) = progress.error.take() {
+                return Err(ChatError::ModelDownloadFailed(error));
+            }
+
+            on_progress(progress);
+        }
     }
 
     Ok(())

@@ -1,5 +1,5 @@
 import { useUI, UILayer, getActiveLayer } from "./store/ui";
-import { useMessages, run, selectModel, syncModels } from "./store/messages";
+import { useMessages, run, selectModel, syncModels, downloadModel } from "./store/messages";
 import { SessionSnapshot } from "./types";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
@@ -72,17 +72,17 @@ export const keymap: KeyBinding[] = [
   },
   {
     keys: "ctrl+w",
-    layers: ["idle", "compose", "edit", "history", "models"],
+    layers: ["idle", "compose", "edit", "history", "models", "downloads"],
     run: () => getCurrentWindow().close(),
   },
   {
     keys: "ctrl+shift+m",
-    layers: ["idle", "compose", "edit", "history", "models"],
+    layers: ["idle", "compose", "edit", "history", "models", "downloads"],
     run: () => getCurrentWindow().minimize(),
   },
   {
     keys: "F11",
-    layers: ["idle", "compose", "edit", "history", "models"],
+    layers: ["idle", "compose", "edit", "history", "models", "downloads"],
     run: async () => {
       const win = getCurrentWindow();
       await win.setFullscreen(!(await win.isFullscreen()));
@@ -90,7 +90,7 @@ export const keymap: KeyBinding[] = [
   },
   {
     keys: "Escape",
-    layers: ["compose", "edit", "history", "models"],
+    layers: ["compose", "edit", "history", "models", "downloads"],
     run: () => {
       useMessages.getState().setError(null);
       useUI.getState().closeTopmost();
@@ -165,6 +165,18 @@ export const keymap: KeyBinding[] = [
       } else if (mode === "idle" && overlay === null) {
         const idx = useMessages.getState().models.findIndex((model) => model.active);
         useUI.setState({ overlay: "models", modelIndex: idx >= 0 ? idx : 0 });
+      }
+    },
+  },
+  {
+    keys: "ctrl+d",
+    layers: ["idle", "downloads"],
+    run: () => {
+      if (useUI.getState().overlay === "downloads") {
+        useUI.getState().setOverlay(null);
+      } else {
+        useMessages.getState().setError(null);
+        useUI.setState({ overlay: "downloads", downloadQuery: "" });
       }
     },
   },
@@ -250,6 +262,13 @@ export const keymap: KeyBinding[] = [
     layers: ["models"],
     run: async () => {
       await syncModels();
+    },
+  },
+  {
+    keys: "Enter",
+    layers: ["downloads"],
+    run: async () => {
+      await downloadModel(useUI.getState().downloadQuery);
     },
   },
 ];

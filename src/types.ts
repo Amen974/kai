@@ -50,11 +50,22 @@ export type ChatEvent =
     }
   | {
       type: "ModelsChanged";
+    }
+  | ({ type: "ModelDownloadProgress" } & DownloadProgress)
+  | {
+      type: "ModelDownloadFinished";
     };
 
 export type Conversation = {
   id: number;
   title: string;
+};
+
+export type DownloadProgress = {
+  name: string;
+  status: string;
+  completed: number;
+  total: number;
 };
 
 export type ModelInfo = {

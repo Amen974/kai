@@ -2,8 +2,14 @@ import { create } from "zustand";
 import { Conversation } from "../types";
 
 export type UIMode = "idle" | "compose" | "edit";
-export type UIOverlay = "history" | "models" | null;
-export type UILayer = "history" | "models" | "compose" | "edit" | "idle";
+export type UIOverlay = "history" | "models" | "downloads" | null;
+export type UILayer =
+  | "history"
+  | "models"
+  | "downloads"
+  | "compose"
+  | "edit"
+  | "idle";
 
 export interface UIState {
   mode: UIMode;
@@ -17,6 +23,7 @@ export interface UIState {
   historyArmedId: number | null;
   historySearchQuery: string;
   modelIndex: number;
+  downloadQuery: string;
   scrollPinSignal: number;
   setMode: (mode: UIMode) => void;
   setOverlay: (overlay: UIOverlay) => void;
@@ -30,6 +37,7 @@ export interface UIState {
   setHistoryArmedId: (id: number | null) => void;
   setHistorySearchQuery: (query: string) => void;
   setModelIndex: (index: number) => void;
+  setDownloadQuery: (query: string) => void;
   forceScrollPin: () => void;
   closeTopmost: () => void;
 }
@@ -47,6 +55,7 @@ export const useUI = create<UIState>(set => ({
   historyArmedId: null,
   historySearchQuery: "",
   modelIndex: 0,
+  downloadQuery: "",
 
   setMode: (mode) => set({ mode }),
   setOverlay: (overlay) => set({ overlay }),
@@ -78,6 +87,7 @@ export const useUI = create<UIState>(set => ({
   setHistoryArmedId: (historyArmedId) => set({ historyArmedId }),
   setHistorySearchQuery: (historySearchQuery) => set({ historySearchQuery }),
   setModelIndex: (modelIndex) => set({ modelIndex }),
+  setDownloadQuery: (downloadQuery) => set({ downloadQuery }),
 
   forceScrollPin: () => set((state) => ({ scrollPinSignal: state.scrollPinSignal + 1 })),
 

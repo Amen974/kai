@@ -31,4 +31,13 @@ pub enum ChatEvent {
     HistoryChanged,
 
     ModelsChanged,
+
+    ModelDownloadProgress {
+        name: String,
+        status: String,
+        completed: u64,
+        total: u64,
+    },
+
+    ModelDownloadFinished,
 }

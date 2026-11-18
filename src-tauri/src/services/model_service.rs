@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::{
     database::repository,
-    models::{ai_model::AiModel, error_model::ChatError},
+    models::{ai_model::AiModel, chat_event::ChatEvent, error_model::ChatError},
     ollama::{get_tags, pull_model, show_model},
 };
 
@@ -51,9 +51,23 @@ pub async fn sync_if_empty(pool: &std::sync::Mutex<Connection>) -> Result<bool, 
 pub async fn download_model(
     pool: &std::sync::Mutex<Connection>,
     name: &str,
+    on_event: impl Fn(ChatEvent),
 ) -> Result<(), ChatError> {
-    pull_model(name).await?;
-    sync_models(pool).await
+    pull_model(name, |progress| {
+        on_event(ChatEvent::ModelDownloadProgress {
+            name: name.to_string(),
+            status: progress.status,
+            completed: progress.completed,
+            total: progress.total,
+        });
+    })
+    .await?;
+
+    sync_models(pool).await?;
+    on_event(ChatEvent::ModelsChanged);
+    on_event(ChatEvent::ModelDownloadFinished);
+
+    Ok(())
 }
 
 pub fn active_model(pool: &std::sync::Mutex<Connection>) -> Result<Option<AiModel>, ChatError> {

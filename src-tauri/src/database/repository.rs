@@ -1,4 +1,4 @@
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 
 use crate::models::{
     ai_model::AiModel,
@@ -198,6 +198,14 @@ pub fn delete_last_message(
          )",
         [history_id, branch_id],
     )?;
+    conn.execute(
+        "UPDATE branches
+         SET head_message_id = (
+             SELECT id FROM messages WHERE branch_id = ?1 ORDER BY id DESC LIMIT 1
+         )
+         WHERE id = ?1",
+        [branch_id],
+    )?;
     Ok(())
 }
 
@@ -269,24 +277,7 @@ pub fn get_nth_message_id(
     branch_id: u32,
     n: usize,
 ) -> Result<Option<u32>, ChatError> {
-    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
-    let mut stmt = conn.prepare(
-        "WITH RECURSIVE branch_tree(id, parent_message_id, depth) AS (
-            SELECT m.id, m.parent_message_id, 0
-            FROM messages m
-            JOIN branches b ON b.head_message_id = m.id
-            WHERE b.id = ?1
-            UNION ALL
-            SELECT m.id, m.parent_message_id, t.depth + 1
-            FROM messages m
-            JOIN branch_tree t ON m.id = t.parent_message_id
-        )
-        SELECT id FROM branch_tree ORDER BY id ASC LIMIT 1 OFFSET ?2",
-    )?;
-    let result: Option<u32> = stmt
-        .query_row([branch_id as i64, n as i64], |row| row.get(0))
-        .optional()?;
-    Ok(result)
+    Ok(load_branch(pool, branch_id)?.get(n).and_then(|message| message.id))
 }
 
 pub fn get_models(pool: &std::sync::Mutex<Connection>) -> Result<Vec<AiModel>, ChatError> {

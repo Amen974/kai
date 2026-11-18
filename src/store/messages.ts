@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
-import { ChatEvent, Message, MessageVariant, ModelInfo, SessionSnapshot } from "../types";
+import {
+  ChatEvent,
+  DownloadProgress,
+  Message,
+  MessageVariant,
+  ModelInfo,
+  SessionSnapshot,
+} from "../types";
 import { useUI } from "./ui";
 
 export interface ChatState {
@@ -9,6 +16,7 @@ export interface ChatState {
   activeBranchId: number | null;
   variantsByParentId: Record<string, MessageVariant[]>;
   models: ModelInfo[];
+  download: DownloadProgress | null;
   isGenerating: boolean;
   error: string | null;
   historyVersion: number;
@@ -86,6 +94,23 @@ export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatSta
         modelsVersion: state.modelsVersion + 1,
       };
     }
+
+    case "ModelDownloadProgress": {
+      return {
+        download: {
+          name: event.name,
+          status: event.status,
+          completed: event.completed,
+          total: event.total,
+        },
+      };
+    }
+
+    case "ModelDownloadFinished": {
+      return {
+        download: null,
+      };
+    }
   }
 }
 
@@ -95,6 +120,7 @@ export const useMessages = create<ChatState>((set) => ({
   activeBranchId: null,
   variantsByParentId: {},
   models: [],
+  download: null,
   isGenerating: false,
   error: null,
   historyVersion: 0,
@@ -184,6 +210,21 @@ async function switchModel(name: string): Promise<boolean> {
   } catch (err) {
     console.error("Failed to switch model:", err);
     return false;
+  }
+}
+
+export async function downloadModel(query: string): Promise<void> {
+  const name = query.trim();
+  if (!name || useMessages.getState().download) return;
+
+  useMessages.setState({
+    download: { name, status: "starting", completed: 0, total: 0 },
+  });
+
+  try {
+    await run("download_model", { name });
+  } catch {
+    useMessages.setState({ download: null });
   }
 }
 
