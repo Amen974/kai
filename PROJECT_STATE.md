@@ -26,7 +26,7 @@ Tests (`src-tauri/`):
 cargo test            # all backend unit tests
 cargo test <name>     # single test
 ```
-Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5 search and its triggers, model catalog reads/writes and the single-active constraint) against an in-memory SQLite database with the real migrations, via the shared `database/test_db.rs` helper. Not covered yet: `services/*`, `ollama.rs`, `commands/*`, and the frontend.
+Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5 search and its triggers, model catalog reads/writes and the single-active constraint) against an in-memory SQLite database with the real migrations, via the shared `database/test_db.rs` helper; `services/chat_service.rs` line buffer and NDJSON parsing, persisting user messages (history/branch creation, parent links, blank rejection) and the no-history early return of title generation. Not covered yet: Ollama-backed paths in `services/*` (`send`, `resend`, `edit`, `sync_models`, title generation) which need an injectable base URL, `ollama.rs`, `commands/*`, and the frontend.
 
 ## Structure
 

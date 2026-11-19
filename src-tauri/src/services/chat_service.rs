@@ -632,3 +632,185 @@ pub async fn create_title(
     update_title(pool, &response, id)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::{
+        repository::{get_active_branch, get_history, load_branch},
+        test_db::in_memory_pool,
+    };
+    use std::cell::RefCell;
+
+    fn empty_session() -> Mutex<ChatSession> {
+        Mutex::new(ChatSession {
+            history_id: None,
+            messages: Vec::new(),
+            active: None,
+            next_generation_id: 0,
+            active_branch_id: None,
+            download: None,
+        })
+    }
+
+    #[test]
+    fn line_buffer_reassembles_a_line_split_across_chunks() {
+        let mut buffer = LineBuffer::new();
+
+        buffer.push_bytes(b"{\"message\":");
+        assert!(buffer.next_line().is_none());
+        buffer.push_bytes(b"{\"content\":\"hi\"},\"done\":false}\n");
+
+        let line = buffer.next_line().expect("complete line").expect("utf8");
+        assert_eq!(line, "{\"message\":{\"content\":\"hi\"},\"done\":false}");
+        assert!(buffer.next_line().is_none());
+    }
+
+    #[test]
+    fn line_buffer_only_yields_complete_lines() {
+        let mut buffer = LineBuffer::new();
+        buffer.push_bytes(b"first\nsecond");
+
+        assert_eq!(buffer.next_line().expect("first line").expect("utf8"), "first");
+        assert!(buffer.next_line().is_none());
+    }
+
+    #[test]
+    fn line_buffer_rejects_invalid_utf8() {
+        let mut buffer = LineBuffer::new();
+        buffer.push_bytes(b"\xff\n");
+
+        let result = buffer.next_line().expect("line");
+
+        assert!(matches!(result, Err(ChatError::Utf8(_))));
+    }
+
+    #[test]
+    fn parse_line_skips_blank_lines() {
+        assert!(matches!(parse_line("   "), Ok(None)));
+    }
+
+    #[test]
+    fn parse_line_reads_content_and_thinking() {
+        let response = parse_line(r#"{"message":{"content":"hi","thinking":"hmm"},"done":false}"#)
+            .expect("parse")
+            .expect("chunk");
+
+        let message = response.message.expect("message");
+        assert_eq!(message.content, "hi");
+        assert_eq!(message.thinking, Some("hmm".to_string()));
+        assert!(!response.done);
+    }
+
+    #[test]
+    fn parse_line_rejects_invalid_json() {
+        assert!(matches!(parse_line("not json"), Err(ChatError::Json(_))));
+    }
+
+    #[tokio::test]
+    async fn record_user_message_creates_a_history_and_branch_on_the_first_message() {
+        let pool = in_memory_pool();
+        let session = empty_session();
+        let events = RefCell::new(Vec::new());
+
+        let (is_new, message_id) = record_user_message(
+            &session,
+            &pool,
+            &"hello".to_string(),
+            &|event| events.borrow_mut().push(event),
+        )
+        .await
+        .expect("record message");
+
+        assert!(is_new);
+        let (history_id, branch_id) = {
+            let state = session.lock().await;
+            assert_eq!(state.messages.len(), 1);
+            assert_eq!(state.messages[0].id, Some(message_id));
+            assert_eq!(state.messages[0].content, "hello");
+            (
+                state.history_id.expect("history id"),
+                state.active_branch_id.expect("branch id"),
+            )
+        };
+
+        assert_eq!(
+            get_active_branch(&pool, history_id).expect("active branch"),
+            branch_id
+        );
+        let stored = load_branch(&pool, branch_id).expect("load branch");
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].id, Some(message_id));
+        assert_eq!(stored[0].parent_message_id, None);
+        assert_eq!(get_history(&pool).expect("history").len(), 1);
+        assert_eq!(events.borrow().len(), 1);
+        assert!(matches!(events.borrow()[0], ChatEvent::Snapshot { .. }));
+    }
+
+    #[tokio::test]
+    async fn record_user_message_links_the_next_message_to_the_previous_head() {
+        let pool = in_memory_pool();
+        let session = empty_session();
+
+        let (_is_new, first_id) = record_user_message(
+            &session,
+            &pool,
+            &"first".to_string(),
+            &|_| {},
+        )
+        .await
+        .expect("first message");
+        let (is_new, second_id) = record_user_message(
+            &session,
+            &pool,
+            &"second".to_string(),
+            &|_| {},
+        )
+        .await
+        .expect("second message");
+
+        assert!(!is_new);
+        let branch_id = {
+            let state = session.lock().await;
+            assert_eq!(state.messages.len(), 2);
+            assert_eq!(state.messages[1].parent_message_id, Some(first_id));
+            state.active_branch_id.expect("branch id")
+        };
+
+        let stored = load_branch(&pool, branch_id).expect("load branch");
+        assert_eq!(
+            stored.iter().map(|message| message.id).collect::<Vec<_>>(),
+            vec![Some(first_id), Some(second_id)]
+        );
+        assert_eq!(get_history(&pool).expect("history").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn record_user_message_rejects_blank_content() {
+        let pool = in_memory_pool();
+        let session = empty_session();
+
+        let result = record_user_message(&session, &pool, &"   ".to_string(), &|_| {}).await;
+
+        assert!(matches!(result, Err(ChatError::EmptyMessage)));
+        assert!(get_history(&pool).expect("history").is_empty());
+        assert!(session.lock().await.messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn title_if_missing_does_nothing_without_a_loaded_history() {
+        let pool = in_memory_pool();
+        let session = empty_session();
+        let events = RefCell::new(Vec::new());
+
+        title_if_missing(
+            &session,
+            &pool,
+            &"hello".to_string(),
+            &|event| events.borrow_mut().push(event),
+        )
+        .await;
+
+        assert!(events.borrow().is_empty());
+    }
+}
