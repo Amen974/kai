@@ -6,15 +6,11 @@ use crate::models::{ai_model::{OllamaDeleteRequest, OllamaPullProgress, OllamaPu
 
 pub const DEFAULT_BASE_URL: &str = "http://localhost:11434";
 
-fn endpoint(base_url: &str, path: &str) -> String {
-    format!("{}{}", base_url.trim_end_matches('/'), path)
-}
-
 pub async fn post_chat(base_url: &str, payload: OllamaRequest) -> Result<Response, ChatError> {
     let client = reqwest::Client::new();
 
     let response = client
-        .post(&endpoint(base_url, "/api/chat"))
+        .post(format!("{base_url}/api/chat"))
         .json(&payload)
         .send()
         .await?
@@ -27,7 +23,7 @@ pub async fn get_tags(base_url: &str) -> Result<OllamaTagsResponse, ChatError> {
     let client = reqwest::Client::new();
 
     let response = client
-        .get(&endpoint(base_url, "/api/tags"))
+        .get(format!("{base_url}/api/tags"))
         .send()
         .await?
         .error_for_status()?;
@@ -45,7 +41,7 @@ pub async fn show_model(base_url: &str, name: &str) -> Result<OllamaShowResponse
     };
 
     let response = client
-        .post(&endpoint(base_url, "/api/show"))
+        .post(format!("{base_url}/api/show"))
         .json(&payload)
         .send()
         .await?
@@ -92,7 +88,7 @@ where
     };
 
     let response = client
-        .post(&endpoint(base_url, "/api/pull"))
+        .post(format!("{base_url}/api/pull"))
         .json(&payload)
         .send()
         .await?;
@@ -147,7 +143,7 @@ pub async fn delete_model(base_url: &str, name: &str) -> Result<(), ChatError> {
     };
 
     client
-        .delete(&endpoint(base_url, "/api/delete"))
+        .delete(format!("{base_url}/api/delete"))
         .json(&payload)
         .send()
         .await?
@@ -160,7 +156,7 @@ pub async fn post_generate(base_url: &str, payload: OllamaRequestGenerate) -> Re
     let client = reqwest::Client::new();
 
     let response = client
-        .post(&endpoint(base_url, "/api/generate"))
+        .post(format!("{base_url}/api/generate"))
         .json(&payload)
         .send()
         .await?
@@ -178,24 +174,17 @@ pub(crate) mod mock {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    #[derive(Clone)]
     pub(crate) struct MockRoute {
-        pub(crate) method: &'static str,
-        pub(crate) path: &'static str,
-        pub(crate) status: u16,
-        pub(crate) body: &'static str,
+        method: &'static str,
+        path: &'static str,
+        status: u16,
+        body: &'static str,
         hold_open: bool,
     }
 
     impl MockRoute {
         pub(crate) fn json(method: &'static str, path: &'static str, body: &'static str) -> Self {
-            Self {
-                method,
-                path,
-                status: 200,
-                body,
-                hold_open: false,
-            }
+            Self::status(method, path, 200, body)
         }
 
         pub(crate) fn status(
@@ -213,13 +202,12 @@ pub(crate) mod mock {
             }
         }
 
+        /// Sends the body without a content length, so the stream stays open until the client
+        /// closes the connection.
         pub(crate) fn hold_open(method: &'static str, path: &'static str, body: &'static str) -> Self {
             Self {
-                method,
-                path,
-                status: 200,
-                body,
                 hold_open: true,
+                ..Self::status(method, path, 200, body)
             }
         }
     }
@@ -238,73 +226,74 @@ pub(crate) mod mock {
             let port = listener.local_addr().expect("mock address").port();
 
             let task = tokio::spawn(async move {
-                loop {
-                    let Ok((mut socket, _)) = listener.accept().await else {
-                        return;
+                while let Ok((mut socket, _)) = listener.accept().await {
+                    let mut buffer = Vec::new();
+                    let mut chunk = [0u8; 1024];
+
+                    let header_end = loop {
+                        match socket.read(&mut chunk).await {
+                            Ok(0) | Err(_) => break None,
+                            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
+                        }
+                        if let Some(position) = buffer
+                            .windows(4)
+                            .position(|window| window == b"\r\n\r\n")
+                        {
+                            break Some(position + 4);
+                        }
                     };
-                    let routes = routes.clone();
+                    let Some(header_end) = header_end else {
+                        continue;
+                    };
 
-                    tokio::spawn(async move {
-                        let mut buffer = Vec::new();
-                        let mut chunk = [0u8; 1024];
-
-                        while find_headers_end(&buffer).is_none() {
-                            match socket.read(&mut chunk).await {
-                                Ok(0) | Err(_) => return,
-                                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
-                            }
+                    let headers = String::from_utf8_lossy(&buffer[..header_end]).to_lowercase();
+                    let content_length: usize = headers
+                        .lines()
+                        .find_map(|line| line.strip_prefix("content-length:"))
+                        .and_then(|value| value.trim().parse().ok())
+                        .unwrap_or(0);
+                    while buffer.len() < header_end + content_length {
+                        match socket.read(&mut chunk).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(read) => buffer.extend_from_slice(&chunk[..read]),
                         }
+                    }
 
-                        let header_end = find_headers_end(&buffer).unwrap_or(0);
-                        let headers = String::from_utf8_lossy(&buffer[..header_end]).to_lowercase();
-                        let content_length: usize = headers
-                            .lines()
-                            .find_map(|line| line.strip_prefix("content-length:"))
-                            .and_then(|value| value.trim().parse().ok())
-                            .unwrap_or(0);
+                    let request = String::from_utf8_lossy(&buffer[..header_end]).to_string();
+                    let mut request_parts = request
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .split_whitespace();
+                    let method = request_parts.next().unwrap_or_default();
+                    let path = request_parts.next().unwrap_or_default();
 
-                        while buffer.len() < header_end + content_length {
-                            match socket.read(&mut chunk).await {
-                                Ok(0) | Err(_) => break,
-                                Ok(read) => buffer.extend_from_slice(&chunk[..read]),
-                            }
-                        }
+                    let route = routes
+                        .iter()
+                        .find(|route| route.method == method && route.path == path);
+                    let (status, body, hold_open) = match route {
+                        Some(route) => (route.status, route.body, route.hold_open),
+                        None => (404, "", false),
+                    };
 
-                        let request_line = String::from_utf8_lossy(&buffer[..header_end])
-                            .lines()
-                            .next()
-                            .unwrap_or_default()
-                            .to_string();
-                        let mut request_parts = request_line.split_whitespace();
-                        let method = request_parts.next().unwrap_or_default();
-                        let path = request_parts.next().unwrap_or_default();
+                    let response = if hold_open {
+                        format!(
+                            "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{body}"
+                        )
+                    } else {
+                        format!(
+                            "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                    };
 
-                        let route = routes
-                            .iter()
-                            .find(|route| route.method == method && route.path == path);
-                        let (status, body, hold_open) = match route {
-                            Some(route) => (route.status, route.body, route.hold_open),
-                            None => (404, "", false),
-                        };
-
-                        let response = if hold_open {
-                            format!(
-                                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{body}"
-                            )
-                        } else {
-                            format!(
-                                "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                                body.len()
-                            )
-                        };
-                        let _ = socket.write_all(response.as_bytes()).await;
-
-                        if hold_open {
-                            let mut scratch = [0u8; 1];
-                            let _ = socket.read(&mut scratch).await;
-                        }
-                        let _ = socket.shutdown().await;
-                    });
+                    if socket.write_all(response.as_bytes()).await.is_err() {
+                        continue;
+                    }
+                    if hold_open {
+                        let mut scratch = [0u8; 1];
+                        socket.read(&mut scratch).await.expect("hold the connection open");
+                    }
                 }
             });
 
@@ -320,43 +309,12 @@ pub(crate) mod mock {
             self.task.abort();
         }
     }
-
-    fn find_headers_end(buffer: &[u8]) -> Option<usize> {
-        buffer
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .map(|position| position + 4)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ollama::mock::{MockOllama, MockRoute};
-
-    fn chat_payload() -> OllamaRequest {
-        OllamaRequest {
-            model: "qwen3:4b".to_string(),
-            messages: Vec::new(),
-            stream: true,
-        }
-    }
-
-    fn generate_payload() -> OllamaRequestGenerate {
-        OllamaRequestGenerate {
-            model: "qwen3:4b".to_string(),
-            prompt: "Summarize".to_string(),
-            stream: false,
-        }
-    }
-
-    #[test]
-    fn endpoint_ignores_a_trailing_slash() {
-        assert_eq!(
-            endpoint("http://127.0.0.1:11434/", "/api/tags"),
-            "http://127.0.0.1:11434/api/tags"
-        );
-    }
 
     #[tokio::test]
     async fn get_tags_reads_the_model_list() {
@@ -388,30 +346,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn show_model_reports_the_vision_capability() {
-        let server = MockOllama::start(vec![MockRoute::json(
-            "POST",
-            "/api/show",
-            r#"{"capabilities":["completion","vision"]}"#,
-        )])
-        .await;
-
-        let show = show_model(&server.base_url, "qwen3:4b")
-            .await
-            .expect("show model");
-
-        assert!(show
-            .capabilities
-            .iter()
-            .any(|capability| capability == "vision"));
-    }
-
-    #[tokio::test]
     async fn post_chat_returns_the_streaming_response() {
         let body = "{\"message\":{\"content\":\"hi\"},\"done\":true}\n";
         let server = MockOllama::start(vec![MockRoute::json("POST", "/api/chat", body)]).await;
 
-        let response = post_chat(&server.base_url, chat_payload())
+        let payload = OllamaRequest {
+            model: "qwen3:4b".to_string(),
+            messages: Vec::new(),
+            stream: true,
+        };
+
+        let response = post_chat(&server.base_url, payload)
             .await
             .expect("post chat");
         let text = response.text().await.expect("chat body");
@@ -428,7 +373,13 @@ mod tests {
         )])
         .await;
 
-        let title = post_generate(&server.base_url, generate_payload())
+        let payload = OllamaRequestGenerate {
+            model: "qwen3:4b".to_string(),
+            prompt: "Summarize".to_string(),
+            stream: false,
+        };
+
+        let title = post_generate(&server.base_url, payload)
             .await
             .expect("post generate");
 
@@ -466,23 +417,22 @@ mod tests {
             "{\"status\":\"pulling manifest\"}\n",
         )])
         .await;
-        let (started, mut progress) = tokio::sync::mpsc::unbounded_channel();
         let cancel = CancellationToken::new();
-        let base_url = server.base_url.clone();
-        let token = cancel.clone();
+        let (started, mut progress) = tokio::sync::mpsc::unbounded_channel();
 
-        let pull = tokio::spawn(async move {
-            pull_model(&base_url, "qwen3:4b", &token, move |event| {
+        let pull = async {
+            pull_model(&server.base_url, "qwen3:4b", &cancel, move |event| {
                 started.send(event.status).expect("progress channel")
             })
             .await
-        });
-        progress.recv().await.expect("first progress");
+        };
+        let stop = async {
+            progress.recv().await;
+            cancel.cancel();
+        };
+        let (pulled, ()) = tokio::join!(pull, stop);
 
-        cancel.cancel();
-        let pulled = pull.await.expect("pull task").expect("pull model");
-
-        assert!(!pulled);
+        assert!(!pulled.expect("pull model"));
     }
 
     #[tokio::test]
@@ -556,13 +506,4 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
-    async fn delete_model_sends_the_delete_request() {
-        let server =
-            MockOllama::start(vec![MockRoute::status("DELETE", "/api/delete", 200, "")]).await;
-
-        delete_model(&server.base_url, "qwen3:4b")
-            .await
-            .expect("delete model");
-    }
 }

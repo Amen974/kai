@@ -292,16 +292,14 @@ mod tests {
         )])
         .await;
         let pool = in_memory_pool();
-        let session = std::sync::Arc::new(Mutex::new(ChatSession::empty()));
+        let session = Mutex::new(ChatSession::empty());
         let (started, mut progress) = tokio::sync::mpsc::unbounded_channel();
-        let base_url = server.base_url.clone();
-        let download_session = session.clone();
 
-        let download = tokio::spawn(async move {
+        let download = async {
             download_model(
-                download_session.as_ref(),
+                &session,
                 &pool,
-                &base_url,
+                &server.base_url,
                 "alpha:1b",
                 move |event| {
                     if matches!(event, ChatEvent::ModelDownloadProgress { .. }) {
@@ -310,13 +308,14 @@ mod tests {
                 },
             )
             .await
-        });
-        progress.recv().await.expect("first progress");
+        };
+        let stop = async {
+            progress.recv().await.expect("first progress");
+            cancel_download(&session).await;
+        };
+        let (pulled, ()) = tokio::join!(download, stop);
 
-        cancel_download(session.as_ref()).await;
-        let pulled = download.await.expect("download task").expect("download model");
-
-        assert!(!pulled);
+        assert!(!pulled.expect("download model"));
         assert!(session.lock().await.download.is_none());
     }
 
