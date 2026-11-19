@@ -621,6 +621,109 @@ mod tests {
         assert!(load_branch(&pool, branch_id).expect("load branch").is_empty());
         assert!(get_history(&pool).expect("get history").is_empty());
     }
+
+    fn model(name: &str, active: bool) -> AiModel {
+        AiModel {
+            name: name.to_string(),
+            family: "llama".to_string(),
+            parameter_size: "8B".to_string(),
+            quantization_level: "Q4_K_M".to_string(),
+            size_bytes: 4_920_000_000,
+            modified_at: "2026-01-02T03:04:05Z".to_string(),
+            supports_vision: false,
+            active,
+        }
+    }
+
+    fn model_names(pool: &std::sync::Mutex<Connection>) -> Vec<String> {
+        get_models(pool)
+            .expect("get models")
+            .into_iter()
+            .map(|stored| stored.name)
+            .collect()
+    }
+
+    fn active_model_name(pool: &std::sync::Mutex<Connection>) -> Option<String> {
+        get_models(pool)
+            .expect("get models")
+            .into_iter()
+            .find(|stored| stored.active)
+            .map(|stored| stored.name)
+    }
+
+    #[test]
+    fn replace_models_stores_every_field() {
+        let pool = in_memory_pool();
+        let mut stored = model("qwen3:4b", true);
+        stored.supports_vision = true;
+
+        replace_models(&pool, &[stored]).expect("replace models");
+        let models = get_models(&pool).expect("get models");
+
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "qwen3:4b");
+        assert_eq!(models[0].family, "llama");
+        assert_eq!(models[0].parameter_size, "8B");
+        assert_eq!(models[0].quantization_level, "Q4_K_M");
+        assert_eq!(models[0].size_bytes, 4_920_000_000);
+        assert_eq!(models[0].modified_at, "2026-01-02T03:04:05Z");
+        assert!(models[0].supports_vision);
+        assert!(models[0].active);
+    }
+
+    #[test]
+    fn get_models_returns_models_ordered_by_name() {
+        let pool = in_memory_pool();
+        replace_models(&pool, &[model("zeta:1b", false), model("alpha:7b", true)])
+            .expect("replace models");
+
+        assert_eq!(model_names(&pool), vec!["alpha:7b", "zeta:1b"]);
+    }
+
+    #[test]
+    fn replace_models_drops_models_no_longer_installed() {
+        let pool = in_memory_pool();
+        replace_models(&pool, &[model("keep:1b", true), model("gone:1b", false)])
+            .expect("replace models");
+
+        replace_models(&pool, &[model("keep:1b", true)]).expect("replace models");
+
+        assert_eq!(model_names(&pool), vec!["keep:1b"]);
+    }
+
+    #[test]
+    fn set_active_model_switches_the_active_row() {
+        let pool = in_memory_pool();
+        replace_models(&pool, &[model("first:1b", true), model("second:1b", false)])
+            .expect("replace models");
+
+        set_active_model(&pool, "second:1b").expect("set active model");
+
+        assert_eq!(active_model_name(&pool), Some("second:1b".to_string()));
+        assert_eq!(get_models(&pool).expect("get models").iter().filter(|stored| stored.active).count(), 1);
+    }
+
+    #[test]
+    fn set_active_model_fails_for_an_unknown_model() {
+        let pool = in_memory_pool();
+        replace_models(&pool, &[model("first:1b", true)]).expect("replace models");
+
+        let result = set_active_model(&pool, "missing:1b");
+
+        assert!(matches!(result, Err(ChatError::ModelNotFound(name)) if name == "missing:1b"));
+        assert_eq!(active_model_name(&pool), Some("first:1b".to_string()));
+    }
+
+    #[test]
+    fn replace_models_rejects_two_active_models() {
+        let pool = in_memory_pool();
+        replace_models(&pool, &[model("first:1b", true)]).expect("replace models");
+
+        let result = replace_models(&pool, &[model("first:1b", true), model("second:1b", true)]);
+
+        assert!(matches!(result, Err(ChatError::Db(_))));
+        assert_eq!(model_names(&pool), vec!["first:1b"]);
+    }
 }
 
 

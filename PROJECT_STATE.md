@@ -26,7 +26,7 @@ Tests (`src-tauri/`):
 cargo test            # all backend unit tests
 cargo test <name>     # single test
 ```
-Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5 search and its triggers) against an in-memory SQLite database with the real migrations, via the shared `database/test_db.rs` helper. Not covered yet: model catalog functions in `repository.rs`, `services/*`, `ollama.rs`, `commands/*`, and the frontend.
+Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5 search and its triggers, model catalog reads/writes and the single-active constraint) against an in-memory SQLite database with the real migrations, via the shared `database/test_db.rs` helper. Not covered yet: `services/*`, `ollama.rs`, `commands/*`, and the frontend.
 
 ## Structure
 
