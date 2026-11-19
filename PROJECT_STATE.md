@@ -26,7 +26,8 @@ Tests (`src-tauri/`):
 cargo test            # all backend unit tests
 cargo test <name>     # single test
 ```
-Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5 search and its triggers, model catalog reads/writes and the single-active constraint) against an in-memory SQLite database with the real migrations, via the shared `database/test_db.rs` helper; `services/chat_service.rs` line buffer and NDJSON parsing, persisting user messages (history/branch creation, parent links, blank rejection) and the no-history early return of title generation. Not covered yet: Ollama-backed paths in `services/*` (`send`, `resend`, `edit`, `sync_models`, title generation) which need an injectable base URL, `ollama.rs`, `commands/*`, and the frontend.
+Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5 search and its triggers, model catalog reads/writes and the single-active constraint) against an in-memory SQLite database with the real migrations, via the shared `database/test_db.rs` helper; `services/chat_service.rs` line buffer and NDJSON parsing, persisting user messages (history/branch creation, parent links, blank rejection) and the no-history early return of title generation; `ollama.rs` every request against a loopback mock HTTP server (`ollama::mock`, built on `tokio`, no extra crates), including pull progress, cancellation, error lines and connection loss; `services/model_service.rs` catalog sync, vision detection, active-model preservation, `sync_if_empty`, download progress/cancel/failure and delete. Not covered yet: the Ollama-backed paths of `services/chat_service.rs` (`send`, `resend`, `edit`, title generation), `commands/*`, and the frontend.
+Every `ollama.rs` request takes a `base_url: &str`; `ollama::DEFAULT_BASE_URL` is `http://localhost:11434` and is what the app passes, while tests pass a mock server URL.
 
 ## Structure
 
@@ -47,7 +48,7 @@ Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5
 - `database/migrations/002_add_fts5.sql`: `history_fts5` virtual table plus triggers for history titles and `role = 'user'` messages.
 - `database/migrations/003_add_models.sql`: `models` table plus a partial unique index allowing only one `active` row.
 - `database/migrations/004_rename_historys.sql`: renames `historys` to `histories` and drops the unused `branches.name` column.
-- `ollama.rs`: `post_chat` (streaming `/api/chat`), `post_generate` (`/api/generate`, used for titles), `get_tags` (`/api/tags`), `show_model` (`/api/show`), `pull_model` (`/api/pull`, takes a `CancellationToken` and returns `Ok(false)` when cancelled, streaming NDJSON progress to a callback, including a final line without a trailing newline; an `error` field, a non-JSON error body, or a stream that ends without the final `success` status becomes `ChatError::ModelDownloadFailed`), `delete_model` (`DELETE /api/delete`).
+- `ollama.rs`: all requests take a `base_url: &str` (the app passes `DEFAULT_BASE_URL`). `post_chat` (streaming `/api/chat`), `post_generate` (`/api/generate`, used for titles), `get_tags` (`/api/tags`), `show_model` (`/api/show`), `pull_model` (`/api/pull`, takes a `CancellationToken` and returns `Ok(false)` when cancelled, streaming NDJSON progress to a callback, including a final line without a trailing newline; an `error` field, a non-JSON error body, or a stream that ends without the final `success` status becomes `ChatError::ModelDownloadFailed`), `delete_model` (`DELETE /api/delete`).
 
 ### Frontend — `src/`
 - `App.tsx`: shell. Installs keymap + chat event listener, recovers session with `get_session`, renders `Home` when `messages.length === 0` and `Chat` otherwise, plus `InputBar`, `HistoryPanel`, `SideLabels`.
@@ -91,5 +92,5 @@ Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5
 - Frameless window (`decorations: false`) with drag region; ctrl+shift+m minimize, F11 fullscreen, ctrl+w close.
 
 ## Known issues / open points
-- Ollama base URL is hardcoded in `ollama.rs`; no settings.
+- The Ollama base URL is a parameter defaulting to `ollama::DEFAULT_BASE_URL`; there is no user setting for it.
 - Only `database/repository.rs` has tests; no frontend tests and no CI.

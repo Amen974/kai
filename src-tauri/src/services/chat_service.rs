@@ -20,7 +20,7 @@ use crate::{
         },
         error_model::ChatError,
     },
-    ollama::{post_chat, post_generate},
+    ollama::{post_chat, post_generate, DEFAULT_BASE_URL},
     services::model_service,
     state::ChatSession,
 };
@@ -323,7 +323,7 @@ async fn generate(
     let model = match model_service::active_model(pool)? {
         Some(model) => model.name,
         None => {
-            model_service::sync_models(pool).await?;
+            model_service::sync_models(pool, DEFAULT_BASE_URL).await?;
             let model = model_service::active_model(pool)?
                 .ok_or(ChatError::NoActiveModel)?
                 .name;
@@ -349,7 +349,7 @@ async fn generate(
     };
 
     let stream_result = select! {
-        res = post_chat(payload) => res,
+        res = post_chat(DEFAULT_BASE_URL, payload) => res,
         _ = token.cancelled()   => {
             return finalize_generation(
                 StopReason::Cancelled,
@@ -628,7 +628,7 @@ pub async fn create_title(
         stream: false,
     };
 
-    let response = post_generate(payload).await?;
+    let response = post_generate(DEFAULT_BASE_URL, payload).await?;
     update_title(pool, &response, id)?;
     Ok(())
 }
@@ -641,17 +641,6 @@ mod tests {
         test_db::in_memory_pool,
     };
     use std::cell::RefCell;
-
-    fn empty_session() -> Mutex<ChatSession> {
-        Mutex::new(ChatSession {
-            history_id: None,
-            messages: Vec::new(),
-            active: None,
-            next_generation_id: 0,
-            active_branch_id: None,
-            download: None,
-        })
-    }
 
     #[test]
     fn line_buffer_reassembles_a_line_split_across_chunks() {
@@ -710,7 +699,7 @@ mod tests {
     #[tokio::test]
     async fn record_user_message_creates_a_history_and_branch_on_the_first_message() {
         let pool = in_memory_pool();
-        let session = empty_session();
+        let session = Mutex::new(ChatSession::empty());
         let events = RefCell::new(Vec::new());
 
         let (is_new, message_id) = record_user_message(
@@ -750,7 +739,7 @@ mod tests {
     #[tokio::test]
     async fn record_user_message_links_the_next_message_to_the_previous_head() {
         let pool = in_memory_pool();
-        let session = empty_session();
+        let session = Mutex::new(ChatSession::empty());
 
         let (_is_new, first_id) = record_user_message(
             &session,
@@ -788,7 +777,7 @@ mod tests {
     #[tokio::test]
     async fn record_user_message_rejects_blank_content() {
         let pool = in_memory_pool();
-        let session = empty_session();
+        let session = Mutex::new(ChatSession::empty());
 
         let result = record_user_message(&session, &pool, &"   ".to_string(), &|_| {}).await;
 
@@ -800,7 +789,7 @@ mod tests {
     #[tokio::test]
     async fn title_if_missing_does_nothing_without_a_loaded_history() {
         let pool = in_memory_pool();
-        let session = empty_session();
+        let session = Mutex::new(ChatSession::empty());
         let events = RefCell::new(Vec::new());
 
         title_if_missing(

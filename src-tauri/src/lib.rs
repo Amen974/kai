@@ -8,6 +8,7 @@ use crate::commands::chat_command::{
     switch_branch,
 };
 use crate::models::chat_event::ChatEvent;
+use crate::ollama::DEFAULT_BASE_URL;
 use crate::commands::model_command::{
     cancel_model_download, delete_model, download_model, get_active_model, get_models,
     set_active_model, sync_models,
@@ -32,7 +33,7 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let pool = handle.state::<std::sync::Mutex<Connection>>();
-                match model_service::sync_if_empty(&pool).await {
+                match model_service::sync_if_empty(&pool, DEFAULT_BASE_URL).await {
                     Ok(true) => emit_chat_event(&handle, ChatEvent::ModelsChanged),
                     Ok(false) => {}
                     Err(error) => eprintln!("Failed to sync Ollama models: {error}"),

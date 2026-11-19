@@ -6,6 +6,7 @@ use crate::{
     commands::chat_command::emit_chat_event,
     database::repository,
     models::{ai_model::AiModel, chat_event::ChatEvent, error_model::ChatError},
+    ollama::DEFAULT_BASE_URL,
     services::model_service,
     state::ChatSession,
 };
@@ -15,7 +16,7 @@ pub async fn sync_models(
     app: AppHandle,
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<(), ChatError> {
-    model_service::sync_models(&pool).await?;
+    model_service::sync_models(&pool, DEFAULT_BASE_URL).await?;
     emit_chat_event(&app, ChatEvent::ModelsChanged);
     Ok(())
 }
@@ -27,7 +28,7 @@ pub async fn download_model(
     chat_session: State<'_, Mutex<ChatSession>>,
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<(), ChatError> {
-    model_service::download_model(&chat_session, &pool, &name, |event| {
+    model_service::download_model(&chat_session, &pool, DEFAULT_BASE_URL, &name, |event| {
         emit_chat_event(&app, event)
     })
     .await?;
@@ -48,7 +49,7 @@ pub async fn delete_model(
     name: String,
     pool: State<'_, std::sync::Mutex<Connection>>,
 ) -> Result<(), ChatError> {
-    model_service::delete_model(&pool, &name).await?;
+    model_service::delete_model(&pool, DEFAULT_BASE_URL, &name).await?;
     emit_chat_event(&app, ChatEvent::ModelsChanged);
     Ok(())
 }

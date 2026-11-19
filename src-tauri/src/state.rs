@@ -176,3 +176,17 @@ impl ChatSession {
         }
    }
 }
+
+#[cfg(test)]
+impl ChatSession {
+    pub(crate) fn empty() -> Self {
+        Self {
+            history_id: None,
+            messages: Vec::new(),
+            active: None,
+            next_generation_id: 0,
+            active_branch_id: None,
+            download: None,
+        }
+    }
+}
