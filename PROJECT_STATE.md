@@ -1,7 +1,7 @@
 # PROJECT_STATE
 
 ## Overview
-`kai` is a local-first desktop AI chat app: Tauri 2 shell, React 19 + TypeScript + Tailwind 4 frontend, Rust backend, SQLite storage, and a local Ollama server (`http://localhost:11434`) for generation. Model is hardcoded to `qwen3:4b`.
+`kai` is a local-first desktop AI chat app: Tauri 2 shell, React 19 + TypeScript + Tailwind 4 frontend, Rust backend, SQLite storage, and a local Ollama server (`http://localhost:11434`) for generation.
 
 ## Stack
 - Frontend: React 19, TypeScript (strict), Vite 8, Tailwind 4, Zustand 5, react-markdown + rehype-highlight.
@@ -21,7 +21,12 @@ Backend (`src-tauri/`):
 cargo check           # typecheck
 cargo build           # build
 ```
-There are no automated tests in the project.
+Tests (`src-tauri/`):
+```
+cargo test            # all backend unit tests
+cargo test <name>     # single test
+```
+Covered: `database/repository.rs` (branch loading, head pointers, variants, FTS5 search and its triggers) against an in-memory SQLite database with the real migrations, via the shared `database/test_db.rs` helper. Not covered yet: model catalog functions in `repository.rs`, `services/*`, `ollama.rs`, `commands/*`, and the frontend.
 
 ## Structure
 
@@ -87,4 +92,4 @@ There are no automated tests in the project.
 
 ## Known issues / open points
 - Ollama base URL is hardcoded in `ollama.rs`; no settings.
-- No tests and no CI.
+- Only `database/repository.rs` has tests; no frontend tests and no CI.

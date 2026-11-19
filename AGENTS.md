@@ -39,8 +39,9 @@ Read this file and `PROJECT_STATE.md` before every task. Follow these rules exac
 
 ## 6. Git
 1. Work only on the `ai` branch. Never touch `main`.
-2. One task = one commit with a clear message describing what changed.
+2. One task finsh wait for me to tell u to commit 
 3. Never force-push, rebase, or rewrite history.
+4. Never mention AI, Codebuff, or any AI tool as a contributor or co-author in commit messages; never add AI attribution, Co-authored-by trailers, or claims of AI assistance. The human developer is the sole commit author. Commit messages must describe only the actual code changes.
 
 ## 7. Final report
 End every task with:
@@ -72,3 +73,7 @@ End every task with:
 
 ### Known issues
 Listed in `PROJECT_STATE.md`. They are not tasks. Do not fix them unless the task says so.
+
+## 9. Testing
+1. `TEST.md` is the testing skill. Read it and follow it exactly whenever the task is to add, fix, or run tests.
+2. Its rules apply on top of this file: tests only (never edit production code to make a test pass), one module per task, and no network, no real Ollama, no real `kai.db` in tests.

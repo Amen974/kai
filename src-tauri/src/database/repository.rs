@@ -350,4 +350,277 @@ pub fn set_active_model(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::database::test_db::in_memory_pool;
+
+    fn seed_history(pool: &std::sync::Mutex<Connection>) -> (u32, u32) {
+        let history_id = create_history(pool).expect("create history");
+        let branch_id = create_branch(pool, history_id, None, None).expect("create branch");
+        set_active_branch(pool, branch_id, history_id).expect("set active branch");
+        (history_id, branch_id)
+    }
+
+    fn append(
+        pool: &std::sync::Mutex<Connection>,
+        history_id: u32,
+        branch_id: u32,
+        role: &str,
+        content: &str,
+    ) -> u32 {
+        let parent = get_head_message_id(pool, branch_id).expect("read head");
+        let id = insert_message(pool, history_id, branch_id, parent, role, content, None)
+            .expect("insert message");
+        update_branch_head(pool, branch_id, id).expect("update head");
+        id
+    }
+
+    fn fork(
+        pool: &std::sync::Mutex<Connection>,
+        history_id: u32,
+        parent_branch_id: u32,
+        fork_message_id: u32,
+    ) -> u32 {
+        let branch_id = create_branch(
+            pool,
+            history_id,
+            Some(parent_branch_id),
+            Some(fork_message_id),
+        )
+        .expect("create fork");
+        update_branch_head(pool, branch_id, fork_message_id).expect("update head");
+        branch_id
+    }
+
+    fn ids(messages: &[ChatMessage]) -> Vec<Option<u32>> {
+        messages.iter().map(|message| message.id).collect()
+    }
+
+    #[test]
+    fn new_branch_has_no_head_and_loads_no_messages() {
+        let pool = in_memory_pool();
+        let (_history_id, branch_id) = seed_history(&pool);
+
+        assert_eq!(get_head_message_id(&pool, branch_id).expect("head"), None);
+        assert!(load_branch(&pool, branch_id).expect("branch").is_empty());
+    }
+
+    #[test]
+    fn update_branch_head_points_the_branch_at_a_message() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        let message_id = insert_message(&pool, history_id, branch_id, None, "user", "hello", None)
+            .expect("insert message");
+
+        update_branch_head(&pool, branch_id, message_id).expect("update head");
+
+        assert_eq!(
+            get_head_message_id(&pool, branch_id).expect("head"),
+            Some(message_id)
+        );
+    }
+
+    #[test]
+    fn set_active_branch_persists_the_selection() {
+        let pool = in_memory_pool();
+        let (history_id, first_branch_id) = seed_history(&pool);
+        let second_branch_id = create_branch(&pool, history_id, Some(first_branch_id), None)
+            .expect("create branch");
+
+        set_active_branch(&pool, second_branch_id, history_id).expect("set active branch");
+
+        assert_eq!(
+            get_active_branch(&pool, history_id).expect("active branch"),
+            second_branch_id
+        );
+    }
+
+    #[test]
+    fn load_branch_returns_messages_in_parent_order() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        let question = append(&pool, history_id, branch_id, "user", "why is the sky blue");
+        let answer = append(&pool, history_id, branch_id, "assistant", "rayleigh scattering");
+
+        let messages = load_branch(&pool, branch_id).expect("load branch");
+
+        assert_eq!(ids(&messages), vec![Some(question), Some(answer)]);
+        assert!(matches!(messages[0].role, Role::User));
+        assert!(matches!(messages[1].role, Role::Assistant));
+        assert_eq!(messages[0].content, "why is the sky blue");
+        assert_eq!(messages[0].parent_message_id, None);
+        assert_eq!(messages[1].parent_message_id, Some(question));
+        assert_eq!(messages[1].thinking, None);
+    }
+
+    #[test]
+    fn load_branch_walks_the_parent_chain_from_a_fork() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        let question = append(&pool, history_id, branch_id, "user", "first question");
+        append(&pool, history_id, branch_id, "assistant", "first answer");
+
+        let fork_id = fork(&pool, history_id, branch_id, question);
+        let edited = append(&pool, history_id, fork_id, "user", "edited question");
+
+        let messages = load_branch(&pool, fork_id).expect("load fork");
+
+        assert_eq!(ids(&messages), vec![Some(question), Some(edited)]);
+    }
+
+    #[test]
+    fn load_branch_fails_on_an_unknown_role() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        let message_id = insert_message(&pool, history_id, branch_id, None, "system", "prompt", None)
+            .expect("insert message");
+        update_branch_head(&pool, branch_id, message_id).expect("update head");
+
+        let result = load_branch(&pool, branch_id);
+
+        assert!(matches!(result, Err(ChatError::Db(_))));
+    }
+
+    #[test]
+    fn get_nth_message_id_returns_the_message_at_an_index() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        let question = append(&pool, history_id, branch_id, "user", "one");
+        let answer = append(&pool, history_id, branch_id, "assistant", "two");
+
+        assert_eq!(get_nth_message_id(&pool, branch_id, 0).expect("index"), Some(question));
+        assert_eq!(get_nth_message_id(&pool, branch_id, 1).expect("index"), Some(answer));
+        assert_eq!(get_nth_message_id(&pool, branch_id, 2).expect("index"), None);
+    }
+
+    #[test]
+    fn delete_last_message_moves_head_to_the_previous_message() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        let question = append(&pool, history_id, branch_id, "user", "question");
+        append(&pool, history_id, branch_id, "assistant", "answer");
+
+        delete_last_message(&pool, history_id, branch_id).expect("delete last message");
+
+        assert_eq!(get_head_message_id(&pool, branch_id).expect("head"), Some(question));
+        let messages = load_branch(&pool, branch_id).expect("load branch");
+        assert_eq!(ids(&messages), vec![Some(question)]);
+        assert_eq!(messages[0].content, "question");
+    }
+
+    #[test]
+    fn delete_last_message_on_a_single_message_branch_clears_the_head() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        append(&pool, history_id, branch_id, "user", "only message");
+
+        delete_last_message(&pool, history_id, branch_id).expect("delete last message");
+
+        assert_eq!(get_head_message_id(&pool, branch_id).expect("head"), None);
+        assert!(load_branch(&pool, branch_id).expect("load branch").is_empty());
+    }
+
+    #[test]
+    fn get_variants_returns_messages_sharing_the_same_parent() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        let question = append(&pool, history_id, branch_id, "user", "question");
+        let first_answer = append(&pool, history_id, branch_id, "assistant", "first answer");
+        let fork_id = fork(&pool, history_id, branch_id, question);
+        let second_answer = append(&pool, history_id, fork_id, "assistant", "second answer");
+
+        let variants = get_variants(&pool, history_id, Some(question)).expect("variants");
+
+        assert_eq!(
+            variants.iter().map(|variant| variant.id).collect::<Vec<_>>(),
+            vec![first_answer, second_answer]
+        );
+        assert_eq!(variants[0].branch_id, branch_id);
+        assert_eq!(variants[1].branch_id, fork_id);
+    }
+
+    #[test]
+    fn search_history_matches_user_message_content() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        append(&pool, history_id, branch_id, "user", "how do I bake sourdough");
+
+        let results = search_history(&pool, "sourdough").expect("search");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, history_id);
+    }
+
+    #[test]
+    fn search_history_matches_a_renamed_title() {
+        let pool = in_memory_pool();
+        let (history_id, _branch_id) = seed_history(&pool);
+        update_title(&pool, &"Old title".to_string(), &history_id).expect("update title");
+        update_title(&pool, &"New title".to_string(), &history_id).expect("update title");
+
+        assert!(search_history(&pool, "old").expect("search").is_empty());
+        assert_eq!(search_history(&pool, "new").expect("search").len(), 1);
+    }
+
+    #[test]
+    fn search_history_ignores_assistant_messages() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        append(&pool, history_id, branch_id, "assistant", "rayleigh scattering");
+
+        assert!(search_history(&pool, "rayleigh").expect("search").is_empty());
+    }
+
+    #[test]
+    fn search_history_matches_partial_words() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        append(&pool, history_id, branch_id, "user", "authentication flow");
+
+        assert_eq!(search_history(&pool, "auth").expect("search").len(), 1);
+    }
+
+    #[test]
+    fn search_history_returns_every_history_for_a_blank_query() {
+        let pool = in_memory_pool();
+        let (first, _first_branch) = seed_history(&pool);
+        let (second, _second_branch) = seed_history(&pool);
+
+        let mut found: Vec<u32> = search_history(&pool, "   ")
+            .expect("search")
+            .iter()
+            .map(|history| history.id)
+            .collect();
+        found.sort();
+
+        assert_eq!(found, vec![first, second]);
+    }
+
+    #[test]
+    fn search_history_drops_a_deleted_user_message() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        append(&pool, history_id, branch_id, "user", "pineapple");
+        assert_eq!(search_history(&pool, "pineapple").expect("search").len(), 1);
+
+        delete_last_message(&pool, history_id, branch_id).expect("delete last message");
+
+        assert!(search_history(&pool, "pineapple").expect("search").is_empty());
+    }
+
+    #[test]
+    fn delete_history_removes_its_messages_and_search_hits() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = seed_history(&pool);
+        append(&pool, history_id, branch_id, "user", "ephemeral");
+
+        delete_history(history_id, &pool).expect("delete history");
+
+        assert!(search_history(&pool, "ephemeral").expect("search").is_empty());
+        assert!(load_branch(&pool, branch_id).expect("load branch").is_empty());
+        assert!(get_history(&pool).expect("get history").is_empty());
+    }
+}
+
 
