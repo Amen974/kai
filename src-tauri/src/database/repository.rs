@@ -350,4 +350,382 @@ pub fn set_active_model(
     Ok(())
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn in_memory_pool() -> std::sync::Mutex<Connection> {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        crate::database::init::migrate(&mut connection).unwrap();
+        std::sync::Mutex::new(connection)
+    }
+
+    fn history_with_branch(pool: &std::sync::Mutex<Connection>) -> (u32, u32) {
+        let history_id = create_history(pool).unwrap();
+        let branch_id = create_branch(pool, history_id, None, None).unwrap();
+        set_active_branch(pool, branch_id, history_id).unwrap();
+        (history_id, branch_id)
+    }
+
+    fn append(
+        pool: &std::sync::Mutex<Connection>,
+        history_id: u32,
+        branch_id: u32,
+        parent_message_id: Option<u32>,
+        role: Role,
+        content: &str,
+    ) -> u32 {
+        let id = insert_message(
+            pool,
+            history_id,
+            branch_id,
+            parent_message_id,
+            role.as_str(),
+            content,
+            None,
+        )
+        .unwrap();
+        update_branch_head(pool, branch_id, id).unwrap();
+        id
+    }
+
+    fn model(name: &str, active: bool) -> AiModel {
+        AiModel {
+            name: name.to_string(),
+            family: "qwen3".to_string(),
+            parameter_size: "4B".to_string(),
+            quantization_level: "Q4_K_M".to_string(),
+            size_bytes: 2_500_000_000,
+            modified_at: "2025-01-01T00:00:00Z".to_string(),
+            supports_vision: false,
+            active,
+        }
+    }
+
+    fn set_updated_at(pool: &std::sync::Mutex<Connection>, id: u32, timestamp: &str) {
+        pool.lock()
+            .unwrap()
+            .execute(
+                "UPDATE histories SET updated_at = ?1 WHERE id = ?2",
+                (timestamp, id),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn create_history_inserts_a_row_that_get_history_lists() {
+        let pool = in_memory_pool();
+
+        let id = create_history(&pool).unwrap();
+
+        let rows = get_history(&pool).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, id);
+        assert!(!rows[0].title.is_empty());
+    }
+
+    #[test]
+    fn get_history_orders_by_updated_at_descending() {
+        let pool = in_memory_pool();
+        let first = create_history(&pool).unwrap();
+        let second = create_history(&pool).unwrap();
+        set_updated_at(&pool, first, "2021-01-01T00:00:00Z");
+        set_updated_at(&pool, second, "2020-01-01T00:00:00Z");
+
+        let ids: Vec<u32> = get_history(&pool).unwrap().iter().map(|h| h.id).collect();
+
+        assert_eq!(ids, vec![first, second]);
+    }
+
+    #[test]
+    fn touch_history_moves_a_history_to_the_top() {
+        let pool = in_memory_pool();
+        let first = create_history(&pool).unwrap();
+        let second = create_history(&pool).unwrap();
+        set_updated_at(&pool, first, "2021-01-01T00:00:00Z");
+        set_updated_at(&pool, second, "2020-01-01T00:00:00Z");
+
+        touch_history(&pool, second).unwrap();
+
+        assert_eq!(get_history(&pool).unwrap()[0].id, second);
+    }
+
+    #[test]
+    fn update_title_overwrites_the_title() {
+        let pool = in_memory_pool();
+        let id = create_history(&pool).unwrap();
+
+        update_title(&pool, &"Renamed chat".to_string(), &id).unwrap();
+
+        assert_eq!(get_history(&pool).unwrap()[0].title, "Renamed chat");
+    }
+
+    #[test]
+    fn set_active_branch_persists_the_selection() {
+        let pool = in_memory_pool();
+        let history_id = create_history(&pool).unwrap();
+        let first = create_branch(&pool, history_id, None, None).unwrap();
+        let second = create_branch(&pool, history_id, Some(first), None).unwrap();
+
+        set_active_branch(&pool, second, history_id).unwrap();
+
+        assert_eq!(get_active_branch(&pool, history_id).unwrap(), second);
+    }
+
+    #[test]
+    fn create_branch_rejects_a_missing_fork_message() {
+        let pool = in_memory_pool();
+        let history_id = create_history(&pool).unwrap();
+
+        let result = create_branch(&pool, history_id, None, Some(99));
+
+        assert!(matches!(result, Err(ChatError::Db(_))));
+    }
+
+    #[test]
+    fn get_head_message_id_is_none_until_update_branch_head_sets_it() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        assert_eq!(get_head_message_id(&pool, branch_id).unwrap(), None);
+
+        let id = append(&pool, history_id, branch_id, None, Role::User, "hi");
+
+        assert_eq!(get_head_message_id(&pool, branch_id).unwrap(), Some(id));
+    }
+
+    #[test]
+    fn load_branch_returns_the_chain_from_the_head_back_to_the_root() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        let user_id = insert_message(
+            &pool,
+            history_id,
+            branch_id,
+            None,
+            Role::User.as_str(),
+            "hello",
+            None,
+        )
+        .unwrap();
+        let assistant_id = insert_message(
+            &pool,
+            history_id,
+            branch_id,
+            Some(user_id),
+            Role::Assistant.as_str(),
+            "hi there",
+            Some("thinking"),
+        )
+        .unwrap();
+        update_branch_head(&pool, branch_id, assistant_id).unwrap();
+
+        let messages = load_branch(&pool, branch_id).unwrap();
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].id, Some(user_id));
+        assert_eq!(messages[0].parent_message_id, None);
+        assert_eq!(messages[0].content, "hello");
+        assert!(matches!(messages[0].role, Role::User));
+        assert_eq!(messages[1].id, Some(assistant_id));
+        assert_eq!(messages[1].parent_message_id, Some(user_id));
+        assert_eq!(messages[1].thinking.as_deref(), Some("thinking"));
+        assert!(matches!(messages[1].role, Role::Assistant));
+    }
+
+    #[test]
+    fn load_branch_returns_nothing_when_the_head_is_unset() {
+        let pool = in_memory_pool();
+        let (_, branch_id) = history_with_branch(&pool);
+
+        assert!(load_branch(&pool, branch_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn load_branch_ignores_messages_outside_the_chain() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        append(&pool, history_id, branch_id, None, Role::User, "kept");
+        let sibling = create_branch(&pool, history_id, Some(branch_id), None).unwrap();
+        append(&pool, history_id, sibling, None, Role::User, "other");
+
+        let messages = load_branch(&pool, branch_id).unwrap();
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].content, "kept");
+    }
+
+    #[test]
+    fn delete_last_message_moves_the_head_back_to_the_previous_message() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        let first = append(&pool, history_id, branch_id, None, Role::User, "one");
+        append(&pool, history_id, branch_id, Some(first), Role::Assistant, "two");
+
+        delete_last_message(&pool, history_id, branch_id).unwrap();
+
+        let messages = load_branch(&pool, branch_id).unwrap();
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].id, Some(first));
+        assert_eq!(get_head_message_id(&pool, branch_id).unwrap(), Some(first));
+    }
+
+    #[test]
+    fn delete_last_message_on_an_empty_branch_leaves_the_head_unset() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+
+        delete_last_message(&pool, history_id, branch_id).unwrap();
+
+        assert_eq!(get_head_message_id(&pool, branch_id).unwrap(), None);
+    }
+
+    #[test]
+    fn get_variants_lists_root_messages_across_branches() {
+        let pool = in_memory_pool();
+        let history_id = create_history(&pool).unwrap();
+        let first_branch = create_branch(&pool, history_id, None, None).unwrap();
+        let second_branch = create_branch(&pool, history_id, Some(first_branch), None).unwrap();
+        let first = append(&pool, history_id, first_branch, None, Role::User, "a");
+        let second = append(&pool, history_id, second_branch, None, Role::User, "b");
+
+        let variants = get_variants(&pool, history_id, None).unwrap();
+
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[0].id, first);
+        assert_eq!(variants[1].id, second);
+        assert_eq!(variants[1].branch_id, second_branch);
+    }
+
+    #[test]
+    fn get_variants_returns_the_children_of_a_message() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        let root = append(&pool, history_id, branch_id, None, Role::User, "root");
+        let other_branch = create_branch(&pool, history_id, Some(branch_id), Some(root)).unwrap();
+        let first = append(&pool, history_id, branch_id, Some(root), Role::Assistant, "a");
+        let second = append(&pool, history_id, other_branch, Some(root), Role::Assistant, "b");
+
+        let variants = get_variants(&pool, history_id, Some(root)).unwrap();
+
+        assert_eq!(variants.len(), 2);
+        assert_eq!(variants[0].id, first);
+        assert_eq!(variants[1].id, second);
+        assert!(get_variants(&pool, history_id, Some(second)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn get_nth_message_id_indexes_the_branch_chain() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        let first = append(&pool, history_id, branch_id, None, Role::User, "one");
+        let second = append(&pool, history_id, branch_id, Some(first), Role::Assistant, "two");
+
+        assert_eq!(get_nth_message_id(&pool, branch_id, 0).unwrap(), Some(first));
+        assert_eq!(get_nth_message_id(&pool, branch_id, 1).unwrap(), Some(second));
+        assert_eq!(get_nth_message_id(&pool, branch_id, 2).unwrap(), None);
+    }
+
+    #[test]
+    fn replace_models_stores_the_catalog_in_name_order() {
+        let pool = in_memory_pool();
+        let mut vision = model("llama3:8b", false);
+        vision.supports_vision = true;
+
+        replace_models(&pool, &[vision, model("qwen3:4b", true)]).unwrap();
+
+        let models = get_models(&pool).unwrap();
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].name, "llama3:8b");
+        assert!(models[0].supports_vision);
+        assert_eq!(models[1].name, "qwen3:4b");
+        assert_eq!(models[1].family, "qwen3");
+        assert_eq!(models[1].size_bytes, 2_500_000_000);
+        assert!(models[1].active);
+        assert!(!models[0].active);
+    }
+
+    #[test]
+    fn replace_models_removes_the_previous_rows() {
+        let pool = in_memory_pool();
+        replace_models(&pool, &[model("qwen3:4b", true), model("llama3:8b", false)]).unwrap();
+
+        replace_models(&pool, &[model("llama3:8b", true)]).unwrap();
+
+        let models = get_models(&pool).unwrap();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].name, "llama3:8b");
+    }
+
+    #[test]
+    fn replace_models_rejects_two_active_models() {
+        let pool = in_memory_pool();
+
+        let result = replace_models(&pool, &[model("qwen3:4b", true), model("llama3:8b", true)]);
+
+        assert!(matches!(result, Err(ChatError::Db(_))));
+        assert!(get_models(&pool).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_history_matches_titles_and_user_messages_but_not_assistant_messages() {
+        let pool = in_memory_pool();
+        let titled = create_history(&pool).unwrap();
+        update_title(&pool, &"Async Runtime".to_string(), &titled).unwrap();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        append(&pool, history_id, branch_id, None, Role::User, "ferret facts");
+        append(&pool, history_id, branch_id, None, Role::Assistant, "zebra trivia");
+
+        assert_eq!(search_history(&pool, "async").unwrap()[0].id, titled);
+        assert_eq!(search_history(&pool, "fer").unwrap()[0].id, history_id);
+        assert!(search_history(&pool, "zebra").unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_history_requires_every_token_to_match() {
+        let pool = in_memory_pool();
+        let (first_history, first_branch) = history_with_branch(&pool);
+        let (second_history, second_branch) = history_with_branch(&pool);
+        append(&pool, first_history, first_branch, None, Role::User, "rust async runtime");
+        append(&pool, second_history, second_branch, None, Role::User, "rust ownership rules");
+
+        let results = search_history(&pool, "rust async").unwrap();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, first_history);
+        assert_eq!(search_history(&pool, "rust").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn search_history_strips_quotes_from_terms() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        append(&pool, history_id, branch_id, None, Role::User, "quoted words");
+
+        assert_eq!(search_history(&pool, "\"quoted\"").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn search_history_falls_back_to_get_history_for_blank_queries() {
+        let pool = in_memory_pool();
+        create_history(&pool).unwrap();
+        create_history(&pool).unwrap();
+
+        assert_eq!(search_history(&pool, "   ").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn search_history_drops_the_entries_of_a_deleted_history() {
+        let pool = in_memory_pool();
+        let id = create_history(&pool).unwrap();
+        update_title(&pool, &"Deleted topic".to_string(), &id).unwrap();
+
+        delete_history(id, &pool).unwrap();
+
+        assert!(search_history(&pool, "deleted").unwrap().is_empty());
+    }
+}
+
 

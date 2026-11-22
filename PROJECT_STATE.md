@@ -22,7 +22,7 @@ cargo check           # typecheck
 cargo build           # build
 cargo test --lib      # backend unit tests
 ```
-Backend unit tests live in `state.rs` and `services/chat_service.rs`. The DB-backed chat service tests open `Connection::open_in_memory()`, enable foreign keys and apply the real migration set through `database::init::migrate`. They cover the DB-backed flow (`record_user_message`, `load_chat`, `switch_branch`, `delete_chat`, `new_chat`, `persist_assistant`) and the streaming/finalize helpers (`LineBuffer`, `parse_line`, `apply_chunk`, `consume_stream` with a fake byte stream, `finalize_generation` for done/cancelled/eof/error). Everything that calls Ollama (`generate`, `send`, `resend`, `edit`, `create_title`, `title_if_missing`) is untested because it needs the network. There are no frontend tests.
+Backend unit tests live in `state.rs`, `services/chat_service.rs`, `services/model_service.rs` and `database/repository.rs`. The DB-backed tests open `Connection::open_in_memory()`, enable foreign keys and apply the real migration set through `database::init::migrate`. The repository tests cover history create/touch/title/list ordering, branch creation and active-branch selection, branch head updates, message insert/chain loading, `delete_last_message`, `get_variants`, `get_nth_message_id`, the model catalog (`get_models`, `replace_models` incl. the single-active index) and FTS `search_history` (titles and user messages only, multi-token AND, quote stripping, blank-query fallback, cleanup on delete). The chat service tests cover the DB-backed flow (`record_user_message`, `load_chat`, `switch_branch`, `delete_chat`, `new_chat`, `persist_assistant`) and the streaming/finalize helpers (`LineBuffer`, `parse_line`, `apply_chunk`, `consume_stream` with a fake byte stream, `finalize_generation` for done/cancelled/eof/error). The model service tests cover the non-network paths: `active_model`, `set_active_model` (switch, unknown name rollback), `sync_if_empty` when the catalog is already populated, and `cancel_download`. Everything that calls Ollama (`generate`, `send`, `resend`, `edit`, `create_title`, `title_if_missing`, `sync_models`, `download_model`, `delete_model`) is untested because it needs the network. There are no frontend tests.
 
 ## Structure
 
@@ -88,4 +88,7 @@ Backend unit tests live in `state.rs` and `services/chat_service.rs`. The DB-bac
 
 ## Known issues / open points
 - Ollama base URL is hardcoded in `ollama.rs`; no settings.
-- No frontend tests and no CI. Network-dependent chat paths (`generate`/`send`/`resend`/`edit` and title generation) have no tests.
+- No frontend tests; CI (`.github/workflows/cargo-test.yml`) runs `cargo test` in `src-tauri/` on every push, with build artifacts cached by `Swatinem/rust-cache`. Network-dependent chat paths (`generate`/`send`/`resend`/`edit` and title generation) have no tests, as do the Ollama-backed model catalog paths (`sync_models`, `download_model`, `delete_model`).
+- The CI workflow is unverified: it has never run on GitHub yet, so the ubuntu `runs-on` image, the Tauri system package list and the `src-tauri` working directory are hand-checked only.
+- CI uses `ubuntu-latest` (currently 24.04) instead of a pinned image, so a runner image change can alter the available Tauri packages.
+- CI relies on the runner's preinstalled stable Rust toolchain; there is no `rust-toolchain.toml` or toolchain action pinning the version.

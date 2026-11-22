@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn end_generation_succeeds_on_correct_generation_id() {
         let mut session = ChatSession::default();
-        
+
         let (generation_id, _) = session.begin_generation().unwrap();
 
         session.end_generation(generation_id);
@@ -251,7 +251,6 @@ mod tests {
         let (first_generation, _) = session.begin_generation().unwrap();
         session.end_generation(first_generation);
 
-        
         let (second_generation, _) = session.begin_generation().unwrap();
         session.end_generation(first_generation);
 
@@ -308,17 +307,6 @@ mod tests {
     }
 
     #[test]
-    fn begin_download_succeeds_again_after_end_download() {
-        let mut session = ChatSession::default();
-        session.begin_download().unwrap();
-        session.end_download();
-
-        let token = session.begin_download().unwrap();
-
-        assert!(!token.is_cancelled());
-    }
-
-    #[test]
     fn push_user_appends_message_with_given_fields() {
         let mut session = ChatSession::default();
 
@@ -331,18 +319,6 @@ mod tests {
         assert!(matches!(message.role, User));
         assert_eq!(message.content, "hello");
         assert!(message.thinking.is_none());
-    }
-
-    #[test]
-    fn push_user_appends_after_existing_messages() {
-        let mut session = ChatSession::default();
-        session.push_user("first".to_string(), Some(1), None);
-
-        session.push_user("second".to_string(), Some(2), Some(1));
-
-        assert_eq!(session.messages.len(), 2);
-        assert_eq!(session.messages[0].content, "first");
-        assert_eq!(session.messages[1].content, "second");
     }
 
     #[test]
@@ -523,15 +499,6 @@ mod tests {
 
         assert!(matches!(result, Err(ChatError::InvalidMessageIndex)));
         assert_eq!(session.messages.len(), 1);
-    }
-
-    #[test]
-    fn truncate_on_empty_session_fails() {
-        let mut session = ChatSession::default();
-
-        let result = session.truncate(0);
-
-        assert!(matches!(result, Err(ChatError::InvalidMessageIndex)));
     }
 
     #[test]

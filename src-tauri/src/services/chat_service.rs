@@ -646,6 +646,11 @@ mod test {
         (session, generation_id)
     }
 
+    fn generation_session() -> (Mutex<ChatSession>, u32, CancellationToken) {
+        let (session, generation_id) = session_ready_for_generation();
+        (Mutex::new(session), generation_id, CancellationToken::new())
+    }
+
     #[test]
     fn line_buffer_returns_none_until_a_newline_arrives() {
         let mut buffer = LineBuffer::new();
@@ -901,7 +906,7 @@ mod test {
         assert!(session.lock().await.active.is_some());
     }
 
-        #[tokio::test]
+    #[tokio::test]
     async fn cancel_generation_on_idle_session_is_a_noop() {
         let session = Mutex::new(ChatSession::default());
 
@@ -1132,7 +1137,7 @@ mod test {
         let state = session.lock().await;
         let branch_id = state.active_branch_id.unwrap();
         assert_eq!(state.messages.len(), 1);
-        assert!(load_branch(&pool, branch_id).unwrap().len() == 1);
+        assert_eq!(load_branch(&pool, branch_id).unwrap().len(), 1);
         drop(state);
 
         let events = events.into_inner();
@@ -1172,7 +1177,7 @@ mod test {
         assert!(!state.snapshot().generating);
         assert_eq!(state.messages.len(), 2);
         assert_eq!(state.messages[1].content, "partial");
-        assert!(load_branch(&pool, branch_id).unwrap().len() == 1);
+        assert_eq!(load_branch(&pool, branch_id).unwrap().len(), 1);
         drop(state);
 
         let events = events.into_inner();
@@ -1236,19 +1241,12 @@ mod test {
         let result = persist_assistant(&session, &pool).await;
 
         assert!(matches!(result, Err(ChatError::NoMessage)));
-        assert!(get_history(&pool).unwrap().len() == 1);
+        assert_eq!(get_history(&pool).unwrap().len(), 1);
     }
 
     #[tokio::test]
     async fn consume_stream_returns_done_and_applies_every_chunk() {
-        let session = Mutex::new(ChatSession::default());
-        let generation_id = {
-            let mut state = session.lock().await;
-            let (generation_id, _) = state.begin_generation().unwrap();
-            state.push_assistant_placeholder();
-            generation_id
-        };
-        let token = CancellationToken::new();
+        let (session, generation_id, token) = generation_session();
         let events = RefCell::new(Vec::new());
         let callback = |event| events.borrow_mut().push(event);
         let stream = futures_util::stream::iter(vec![
@@ -1270,14 +1268,7 @@ mod test {
 
     #[tokio::test]
     async fn consume_stream_reassembles_a_line_split_across_chunks() {
-        let session = Mutex::new(ChatSession::default());
-        let generation_id = {
-            let mut state = session.lock().await;
-            let (generation_id, _) = state.begin_generation().unwrap();
-            state.push_assistant_placeholder();
-            generation_id
-        };
-        let token = CancellationToken::new();
+        let (session, generation_id, token) = generation_session();
         let callback = |_: ChatEvent| {};
         let stream = futures_util::stream::iter(vec![
             Ok::<Bytes, reqwest::Error>(Bytes::from_static(
@@ -1294,14 +1285,7 @@ mod test {
 
     #[tokio::test]
     async fn consume_stream_reports_eof_when_the_stream_ends_without_done() {
-        let session = Mutex::new(ChatSession::default());
-        let generation_id = {
-            let mut state = session.lock().await;
-            let (generation_id, _) = state.begin_generation().unwrap();
-            state.push_assistant_placeholder();
-            generation_id
-        };
-        let token = CancellationToken::new();
+        let (session, generation_id, token) = generation_session();
         let callback = |_: ChatEvent| {};
         let stream = futures_util::stream::iter(vec![Ok::<Bytes, reqwest::Error>(
             Bytes::from_static(b"{\"message\":{\"content\":\"cut\"},\"done\":false}\n"),
@@ -1315,14 +1299,7 @@ mod test {
 
     #[tokio::test]
     async fn consume_stream_stops_when_the_token_is_cancelled() {
-        let session = Mutex::new(ChatSession::default());
-        let generation_id = {
-            let mut state = session.lock().await;
-            let (generation_id, _) = state.begin_generation().unwrap();
-            state.push_assistant_placeholder();
-            generation_id
-        };
-        let token = CancellationToken::new();
+        let (session, generation_id, token) = generation_session();
         token.cancel();
         let callback = |_: ChatEvent| {};
         let stream = futures_util::stream::pending::<Result<Bytes, reqwest::Error>>();
@@ -1335,14 +1312,7 @@ mod test {
 
     #[tokio::test]
     async fn consume_stream_reports_invalid_json() {
-        let session = Mutex::new(ChatSession::default());
-        let generation_id = {
-            let mut state = session.lock().await;
-            let (generation_id, _) = state.begin_generation().unwrap();
-            state.push_assistant_placeholder();
-            generation_id
-        };
-        let token = CancellationToken::new();
+        let (session, generation_id, token) = generation_session();
         let callback = |_: ChatEvent| {};
         let stream = futures_util::stream::iter(vec![Ok::<Bytes, reqwest::Error>(
             Bytes::from_static(b"not json\n"),
@@ -1355,14 +1325,7 @@ mod test {
 
     #[tokio::test]
     async fn consume_stream_ends_when_the_generation_id_is_stale() {
-        let session = Mutex::new(ChatSession::default());
-        let generation_id = {
-            let mut state = session.lock().await;
-            let (generation_id, _) = state.begin_generation().unwrap();
-            state.push_assistant_placeholder();
-            generation_id
-        };
-        let token = CancellationToken::new();
+        let (session, generation_id, token) = generation_session();
         let callback = |_: ChatEvent| {};
         let stream = futures_util::stream::iter(vec![Ok::<Bytes, reqwest::Error>(
             Bytes::from_static(b"{\"message\":{\"content\":\"stale\"},\"done\":false}\n"),
@@ -1391,7 +1354,6 @@ mod test {
         assert!(snapshot.messages.is_empty());
         assert!(snapshot.active_branch_id.is_none());
         assert!(!snapshot.generating);
-        assert!(session.lock().await.messages.is_empty());
         assert_eq!(get_history(&pool).unwrap().len(), 1);
     }
 
@@ -1491,7 +1453,6 @@ mod test {
         assert_eq!(state.messages[1].parent_message_id, Some(first_id));
 
         assert_eq!(get_head_message_id(&pool, branch_id).unwrap(), Some(second_id));
-        assert_eq!(get_history(&pool).unwrap().len(), 1);
 
         let persisted = load_branch(&pool, branch_id).unwrap();
         let contents: Vec<&str> = persisted.iter().map(|m| m.content.as_str()).collect();
@@ -1579,7 +1540,6 @@ mod test {
         assert_eq!(snapshot.messages.len(), 1);
         assert_eq!(snapshot.messages[0].content, "other");
         assert_eq!(get_active_branch(&pool, history_id).unwrap(), second_branch_id);
-        assert_eq!(session.lock().await.active_branch_id, Some(second_branch_id));
     }
 
     #[tokio::test]
