@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { run, useMessages } from "../store/messages";
+import { detachAttachment, run, useMessages } from "../store/messages";
 import { useUI } from "../store/ui";
+import { AttachmentChip } from "./AttachmentChip";
 
 const MAX_HEIGHT = 200;
 
@@ -18,6 +19,7 @@ const InputBar = ({ isHome }: InputBarProps) => {
   const setMode = useUI((state) => state.setMode);
 
   const isGenerating = useMessages((state) => state.isGenerating);
+  const attachments = useMessages((state) => state.attachments);
   const error = useMessages((state) => state.error);
   const setError = useMessages((state) => state.setError);
 
@@ -27,6 +29,7 @@ const InputBar = ({ isHome }: InputBarProps) => {
   const isCompose = mode === "compose";
   const isOpen = isEdit || isCompose;
   const currentValue = isEdit ? editDraft : draft;
+  const pendingAttachments = isEdit ? [] : attachments;
 
   const resize = () => {
     const el = textareaRef.current;
@@ -54,7 +57,7 @@ const InputBar = ({ isHome }: InputBarProps) => {
 
   const handleSend = async () => {
     const trimmed = draft.trim();
-    if (!trimmed || isGenerating) return;
+    if ((!trimmed && attachments.length === 0) || isGenerating) return;
 
     setError(null);
     const savedDraft = draft;
@@ -114,7 +117,19 @@ const InputBar = ({ isHome }: InputBarProps) => {
           </div>
         )}
 
-        <div className="panel-card px-6 py-1 min-h-[9vh] flex items-center w-full">
+        <div className="panel-card px-6 py-3 min-h-[9vh] flex flex-col justify-center gap-2 w-full">
+          {pendingAttachments.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {pendingAttachments.map((attachment) => (
+                <AttachmentChip
+                  key={attachment.path}
+                  attachment={attachment}
+                  onRemove={() => detachAttachment(attachment)}
+                />
+              ))}
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             rows={1}
@@ -139,6 +154,12 @@ const InputBar = ({ isHome }: InputBarProps) => {
             className="no-scrollbar overflow-y-auto max-h-50 resize-none outline-none text-base leading-6 tracking-widest placeholder:text-(--color-text-muted) w-full field-sizing-content"
             placeholder={isEdit ? "Edit message" : undefined}
           />
+
+          {isCompose && pendingAttachments.length === 0 && (
+            <div className="label text-[0.55rem] tracking-[0.2em] uppercase text-(--color-text-muted) opacity-60 select-none">
+              Drop a .txt or image to attach
+            </div>
+          )}
         </div>
       </div>
     </div>

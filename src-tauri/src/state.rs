@@ -63,6 +63,16 @@ impl ChatSession {
         std::mem::take(&mut self.pending_attachments)
     }
 
+    pub fn remove_pending_attachment(&mut self, path: &str) -> Result<Attachment, ChatError> {
+        let index = self
+            .pending_attachments
+            .iter()
+            .position(|attachment| attachment.path == path)
+            .ok_or_else(|| ChatError::AttachmentNotFound(path.to_string()))?;
+
+        Ok(self.pending_attachments.remove(index))
+    }
+
     pub fn end_generation(&mut self, generation_id: u32) {
         if let Some(active) = &self.active {
             if active.generation_id == generation_id {
@@ -682,6 +692,30 @@ mod tests {
         let mut session = ChatSession::default();
 
         assert!(session.take_pending_attachments().is_empty());
+    }
+
+    #[test]
+    fn remove_pending_attachment_drops_only_the_matching_path() {
+        let mut session = ChatSession::default();
+        session.add_pending_attachment(attachment("first.txt"));
+        session.add_pending_attachment(attachment("second.txt"));
+
+        let result = session.remove_pending_attachment("/tmp/notes.txt");
+
+        assert!(result.is_ok());
+        assert_eq!(session.pending_attachments.len(), 1);
+        assert_eq!(session.pending_attachments[0].name, "second.txt");
+    }
+
+    #[test]
+    fn remove_pending_attachment_fails_for_an_unknown_path() {
+        let mut session = ChatSession::default();
+        session.add_pending_attachment(attachment("notes.txt"));
+
+        let result = session.remove_pending_attachment("/tmp/missing.txt");
+
+        assert!(matches!(result, Err(ChatError::AttachmentNotFound(path)) if path == "/tmp/missing.txt"));
+        assert_eq!(session.pending_attachments.len(), 1);
     }
 
     #[test]

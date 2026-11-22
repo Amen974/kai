@@ -21,3 +21,11 @@ pub async fn attach_file(
 
     attachment_service::attach(&app_data_dir, Path::new(&path), &chat_session, &pool).await
 }
+
+#[tauri::command]
+pub async fn remove_pending_attachment(
+    path: String,
+    chat_session: State<'_, Mutex<ChatSession>>,
+) -> Result<(), ChatError> {
+    attachment_service::detach(&chat_session, &path).await
+}

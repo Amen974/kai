@@ -52,6 +52,9 @@ pub enum ChatError {
     #[error("attachment '{0}' is empty")]
     EmptyAttachment(String),
 
+    #[error("pending attachment '{0}' not found")]
+    AttachmentNotFound(String),
+
     #[error("model '{0}' cannot read images")]
     AttachmentNeedsVisionModel(String),
 

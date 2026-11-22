@@ -7,12 +7,14 @@ use tokio_util::{bytes::Bytes, sync::CancellationToken};
 
 use crate::{
     database::repository::{
-        create_branch, create_history, delete_history, delete_last_message, get_active_branch,
+        attachment_paths_for_history, create_branch, create_history, delete_history,
+        delete_last_message, get_active_branch,
         get_head_message_id, get_nth_message_id, insert_attachments, insert_message, load_branch,
         set_active_branch, touch_history, update_branch_head, update_title,
     },
     models::{
-        attachment_model::AttachmentKind,
+        ai_model::AiModel,
+        attachment_model::{Attachment, AttachmentKind},
         chat_event::ChatEvent,
         chat_model::{
             ChatMessage, OllamaMessage, OllamaRequest, OllamaRequestGenerate, OllamaResponse,
@@ -96,6 +98,25 @@ fn with_attachments(
     }
 
     Ok(messages)
+}
+
+fn validate_pending(
+    pending: &[Attachment],
+    model_name: &str,
+    supports_vision: bool,
+) -> Result<(), ChatError> {
+    for attachment in pending {
+        match attachment.kind {
+            AttachmentKind::Image => {
+                attachment_service::require_vision(model_name, supports_vision)?
+            }
+            AttachmentKind::Text => {
+                attachment_service::read_text(attachment)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_line(line: &str) -> Result<Option<OllamaResponse>, ChatError> {
@@ -349,20 +370,27 @@ async fn finalize_generation(
     }
 }
 
+async fn active_model_or_sync(
+    pool: &std::sync::Mutex<Connection>,
+    update_callback: &impl Fn(ChatEvent),
+) -> Result<AiModel, ChatError> {
+    match model_service::active_model(pool)? {
+        Some(model) => Ok(model),
+        None => {
+            model_service::sync_models(pool).await?;
+            let model = model_service::active_model(pool)?.ok_or(ChatError::NoActiveModel)?;
+            update_callback(ChatEvent::ModelsChanged);
+            Ok(model)
+        }
+    }
+}
+
 async fn generate(
     session_mutex: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
     update_callback: &impl Fn(ChatEvent),
 ) -> Result<(), ChatError> {
-    let model = match model_service::active_model(pool)? {
-        Some(model) => model,
-        None => {
-            model_service::sync_models(pool).await?;
-            let model = model_service::active_model(pool)?.ok_or(ChatError::NoActiveModel)?;
-            update_callback(ChatEvent::ModelsChanged);
-            model
-        }
-    };
+    let model = active_model_or_sync(pool, update_callback).await?;
 
     let (generation_id, token, snapshot, request_messages) = {
         let mut state = session_mutex.lock().await;
@@ -420,14 +448,42 @@ pub async fn title_if_missing(
     message: &String,
     update_callback: &impl Fn(ChatEvent),
 ) {
-    let history_id = {
+    let (history_id, attachment_names) = {
         let state = session_mutex.lock().await;
-        state.history_id
+        let names = state
+            .messages
+            .iter()
+            .rev()
+            .find(|message| matches!(message.role, User))
+            .map(|message| {
+                message
+                    .attachments
+                    .iter()
+                    .map(|attachment| attachment.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (state.history_id, names)
     };
 
     let Some(hid) = history_id else {
         return;
     };
+
+    if message.trim().is_empty() {
+        if attachment_names.is_empty() {
+            return;
+        }
+
+        if let Err(err) = update_title(pool, &attachment_names.join(", "), &hid) {
+            update_callback(ChatEvent::Error {
+                message: err.to_string(),
+            });
+            return;
+        }
+        update_callback(ChatEvent::HistoryChanged);
+        return;
+    }
 
     if let Err(err) = update_title(pool, message, &hid) {
         update_callback(ChatEvent::Error {
@@ -489,9 +545,19 @@ async fn record_user_message(
 
     let attachments = state.take_pending_attachments();
     if !attachments.is_empty() {
-        let stored = insert_attachments(pool, new_id, &attachments)?;
-        if let Some(message) = state.messages.last_mut() {
-            message.attachments = stored;
+        let stored = insert_attachments(pool, new_id, &attachments);
+        match stored {
+            Ok(stored) => {
+                if let Some(message) = state.messages.last_mut() {
+                    message.attachments = stored;
+                }
+            }
+            Err(err) => {
+                for attachment in attachments {
+                    state.add_pending_attachment(attachment);
+                }
+                return Err(err);
+            }
         }
     }
 
@@ -506,6 +572,12 @@ pub async fn send(
     pool: &std::sync::Mutex<Connection>,
     update_callback: impl Fn(ChatEvent),
 ) -> Result<bool, ChatError> {
+    let pending = { session.lock().await.pending_attachments.clone() };
+    if !pending.is_empty() {
+        let model = active_model_or_sync(pool, &update_callback).await?;
+        validate_pending(&pending, &model.name, model.supports_vision)?;
+    }
+
     let (is_new, _) = record_user_message(session, pool, &message, &update_callback).await?;
     generate(session, pool, &update_callback).await?;
     Ok(is_new)
@@ -576,6 +648,9 @@ pub async fn load_chat(
 ) -> Result<SessionSnapshot, ChatError> {
     cancel_generation(session).await;
 
+    let discarded = session.lock().await.take_pending_attachments();
+    attachment_service::discard(discarded.iter().map(|attachment| attachment.path.as_str()))?;
+
     let active_branch_id = get_active_branch(pool, id)?;
 
     let messages = load_branch(pool, active_branch_id)?;
@@ -598,6 +673,9 @@ pub async fn switch_branch(
         state.history_id.ok_or(ChatError::NoActiveBranch)?
     };
 
+    let discarded = session.lock().await.take_pending_attachments();
+    attachment_service::discard(discarded.iter().map(|attachment| attachment.path.as_str()))?;
+
     let messages = load_branch(pool, branch_id)?;
 
     set_active_branch(pool, branch_id, history_id)?;
@@ -609,12 +687,15 @@ pub async fn switch_branch(
     Ok(state.snapshot())
 }
 
-pub async fn new_chat(session: &Mutex<ChatSession>) -> SessionSnapshot {
+pub async fn new_chat(session: &Mutex<ChatSession>) -> Result<SessionSnapshot, ChatError> {
     cancel_generation(session).await;
+
+    let discarded = session.lock().await.take_pending_attachments();
+    attachment_service::discard(discarded.iter().map(|attachment| attachment.path.as_str()))?;
 
     let mut state = session.lock().await;
     state.reset();
-    state.snapshot()
+    Ok(state.snapshot())
 }
 
 pub async fn delete_chat(
@@ -622,6 +703,8 @@ pub async fn delete_chat(
     session: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
 ) -> Result<(), ChatError> {
+    let mut paths = attachment_paths_for_history(pool, id)?;
+
     let is_current = {
         let state = session.lock().await;
         state.history_id == Some(id)
@@ -629,12 +712,19 @@ pub async fn delete_chat(
 
     if is_current {
         cancel_generation(session).await;
-        let mut state = session.lock().await;
-        state.reset();
+
+        let discarded = {
+            let mut state = session.lock().await;
+            let pending = state.take_pending_attachments();
+            state.reset();
+            pending
+        };
+        paths.extend(discarded.into_iter().map(|attachment| attachment.path));
     }
 
     delete_history(id, pool)?;
-    Ok(())
+
+    attachment_service::discard(paths.iter().map(String::as_str))
 }
 
 pub async fn cancel_generation(session: &Mutex<ChatSession>) {
@@ -1404,7 +1494,7 @@ mod test {
             .await
             .unwrap();
 
-        let snapshot = new_chat(&session).await;
+        let snapshot = new_chat(&session).await.unwrap();
 
         assert!(snapshot.history_id.is_none());
         assert!(snapshot.messages.is_empty());

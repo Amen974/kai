@@ -210,6 +210,25 @@ pub fn delete_last_message(
     Ok(())
 }
 
+pub fn attachment_paths_for_history(
+    pool: &std::sync::Mutex<Connection>,
+    history_id: u32,
+) -> Result<Vec<String>, ChatError> {
+    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
+    let mut stmt = conn.prepare(
+        "SELECT a.path
+         FROM attachments a
+         JOIN messages m ON m.id = a.message_id
+         WHERE m.history_id = ?1",
+    )?;
+
+    let paths = stmt
+        .query_map([history_id], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+
+    Ok(paths)
+}
+
 pub fn insert_attachments(
     pool: &std::sync::Mutex<Connection>,
     message_id: u32,

@@ -7,7 +7,7 @@ use crate::commands::chat_command::{
     get_variants, load_chat, new_chat, resend_message, search_history, send_message,
     switch_branch,
 };
-use crate::commands::attachment_command::attach_file;
+use crate::commands::attachment_command::{attach_file, remove_pending_attachment};
 use crate::models::chat_event::ChatEvent;
 use crate::commands::model_command::{
     cancel_model_download, delete_model, download_model, get_active_model, get_models,
@@ -65,6 +65,7 @@ pub fn run() {
             cancel_model_download,
             delete_model,
             attach_file,
+            remove_pending_attachment,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

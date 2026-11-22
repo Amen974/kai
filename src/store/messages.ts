@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  Attachment,
   ChatEvent,
   DownloadProgress,
   Message,
@@ -15,6 +16,7 @@ export interface ChatState {
   historyId: number | null;
   activeBranchId: number | null;
   variantsByParentId: Record<string, MessageVariant[]>;
+  attachments: Attachment[];
   models: ModelInfo[];
   download: DownloadProgress | null;
   isGenerating: boolean;
@@ -42,6 +44,7 @@ export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatSta
     case "Snapshot": {
       const updates: Partial<ChatState> = {
         messages: event.messages,
+        attachments: [],
         error: null,
       };
       if (event.history_id !== undefined) {
@@ -113,6 +116,7 @@ export const useMessages = create<ChatState>((set) => ({
   historyId: null,
   activeBranchId: null,
   variantsByParentId: {},
+  attachments: [],
   models: [],
   download: null,
   isGenerating: false,
@@ -177,6 +181,32 @@ export async function switchBranch(branchId: number): Promise<void> {
     useUI.getState().forceScrollPin();
   } catch (err) {
     console.error("Failed to switch branch:", err);
+  }
+}
+
+export async function attachFiles(paths: string[]): Promise<void> {
+  const ui = useUI.getState();
+  if (useMessages.getState().isGenerating || ui.overlay !== null || ui.mode === "edit") return;
+  if (ui.mode !== "compose") ui.startCompose();
+
+  for (const path of paths) {
+    try {
+      const attachment = await run<Attachment>("attach_file", { path });
+      useMessages.setState((state) => ({ attachments: [...state.attachments, attachment] }));
+    } catch {
+      continue;
+    }
+  }
+}
+
+export async function detachAttachment(attachment: Attachment): Promise<void> {
+  try {
+    await run("remove_pending_attachment", { path: attachment.path });
+    useMessages.setState((state) => ({
+      attachments: state.attachments.filter((item) => item.path !== attachment.path),
+    }));
+  } catch (err) {
+    console.error("Failed to detach attachment:", err);
   }
 }
 

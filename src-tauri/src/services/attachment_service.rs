@@ -140,6 +140,27 @@ pub async fn attach(
     Ok(attachment)
 }
 
+fn remove_copy(path: &str) -> Result<(), ChatError> {
+    match fs::remove_file(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        result => result.map_err(ChatError::from),
+    }
+}
+
+pub fn discard<'a>(paths: impl IntoIterator<Item = &'a str>) -> Result<(), ChatError> {
+    for path in paths {
+        remove_copy(path)?;
+    }
+
+    Ok(())
+}
+
+pub async fn detach(session: &Mutex<ChatSession>, path: &str) -> Result<(), ChatError> {
+    let attachment = session.lock().await.remove_pending_attachment(path)?;
+
+    discard(std::iter::once(attachment.path.as_str()))
+}
+
 pub fn read_text(attachment: &Attachment) -> Result<String, ChatError> {
     Ok(fs::read_to_string(&attachment.path)?)
 }
@@ -202,5 +223,67 @@ mod tests {
     #[test]
     fn encode_base64_keeps_high_bytes() {
         assert_eq!(encode_base64(&[0xff, 0xd8, 0xff]), "/9j/");
+    }
+
+    fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("kai-detach-{}-{name}", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    fn queued_attachment(path: &Path) -> Attachment {
+        Attachment {
+            id: None,
+            name: "notes.txt".to_string(),
+            kind: AttachmentKind::Text,
+            mime_type: "text/plain".to_string(),
+            path: path.to_string_lossy().to_string(),
+            size_bytes: 4,
+        }
+    }
+
+    #[tokio::test]
+    async fn detach_removes_the_queued_attachment_and_its_copy() {
+        let path = temp_file("detach.txt", b"body");
+        let queued_path = path.to_string_lossy().to_string();
+        let session = Mutex::new(ChatSession::default());
+        session
+            .lock()
+            .await
+            .add_pending_attachment(queued_attachment(&path));
+
+        detach(&session, &queued_path).await.unwrap();
+
+        assert!(!path.exists());
+        assert!(session.lock().await.pending_attachments.is_empty());
+    }
+
+    #[tokio::test]
+    async fn detach_leaves_a_file_that_is_not_queued_alone() {
+        let path = temp_file("unqueued.txt", b"body");
+        let session = Mutex::new(ChatSession::default());
+
+        let result = detach(&session, &path.to_string_lossy()).await;
+
+        assert!(matches!(result, Err(ChatError::AttachmentNotFound(_))));
+        assert!(path.exists());
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn detach_tolerates_a_copy_that_is_already_gone() {
+        let path = temp_file("gone.txt", b"body");
+        let queued_path = path.to_string_lossy().to_string();
+        let session = Mutex::new(ChatSession::default());
+        session
+            .lock()
+            .await
+            .add_pending_attachment(queued_attachment(&path));
+        std::fs::remove_file(&path).unwrap();
+
+        let result = detach(&session, &queued_path).await;
+
+        assert!(result.is_ok());
+        assert!(session.lock().await.pending_attachments.is_empty());
     }
 }

@@ -39,7 +39,7 @@ Read this file and `PROJECT_STATE.md` before every task. Follow these rules exac
 
 ## 6. Git
 1. Work only on the `ai` branch. Never touch `main`.
-2. One task = one commit with a clear message describing what changed.
+2. do not commit uless i tell u.
 3. Never force-push, rebase, or rewrite history.
 
 ## 7. Final report

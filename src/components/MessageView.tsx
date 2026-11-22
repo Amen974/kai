@@ -4,6 +4,7 @@ import ThinkingBlock from "./ThinkingBlock";
 import MarkdownMessage from "./MarkdownMessage";
 import Copy from "./Copy";
 import BranchNavigator from "./BranchNavigator";
+import { AttachmentChip } from "./AttachmentChip";
 import { parentKey, useMessages } from "../store/messages";
 
 export interface MessageViewProps {
@@ -41,7 +42,7 @@ export const MessageView = React.memo(function MessageView({
 
   if (message.role === "user") {
     return (
-      <div ref={setRef} className="flex flex-col items-end">
+      <div ref={setRef} className="flex flex-col items-end gap-2">
         <div
           onClick={async () => await navigator.clipboard.writeText(message.content)}
           className={`flex justify-end text-right transition-all duration-200 cursor-pointer w-full ${
@@ -50,6 +51,13 @@ export const MessageView = React.memo(function MessageView({
         >
           <p className="w-[70%]">{message.content}</p>
         </div>
+        {message.attachments && message.attachments.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-2">
+            {message.attachments.map((attachment) => (
+              <AttachmentChip key={attachment.id ?? attachment.path} attachment={attachment} />
+            ))}
+          </div>
+        )}
         <BranchNavigator
           variants={variants}
           currentIndex={currentIndex}

@@ -3,6 +3,17 @@ export type MessageVariant = {
   branch_id: number;
 };
 
+export type AttachmentKind = "image" | "text";
+
+export type Attachment = {
+  id?: number | null;
+  name: string;
+  kind: AttachmentKind;
+  mime_type: string;
+  path: string;
+  size_bytes: number;
+};
+
 export type Message = {
   id?: number | null;
   parent_message_id?: number | null;
@@ -10,6 +21,7 @@ export type Message = {
   content: string;
   thinking?: string | null;
   branch_id?: number | null;
+  attachments?: Attachment[];
   variants?: MessageVariant[];
   current_variant_index?: number;
 };
