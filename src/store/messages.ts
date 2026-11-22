@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Attachment,
   ChatEvent,
@@ -184,18 +185,24 @@ export async function switchBranch(branchId: number): Promise<void> {
   }
 }
 
-export async function attachFiles(paths: string[]): Promise<void> {
-  const ui = useUI.getState();
-  if (useMessages.getState().isGenerating || ui.overlay !== null || ui.mode === "edit") return;
-  if (ui.mode !== "compose") ui.startCompose();
+export async function pickAttachments(): Promise<void> {
+  try {
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: "Text or image", extensions: ["txt", "png", "jpg", "jpeg", "webp", "gif"] }],
+    });
+    if (!selected) return;
 
-  for (const path of paths) {
-    try {
-      const attachment = await run<Attachment>("attach_file", { path });
-      useMessages.setState((state) => ({ attachments: [...state.attachments, attachment] }));
-    } catch {
-      continue;
+    for (const path of Array.isArray(selected) ? selected : [selected]) {
+      try {
+        const attachment = await run<Attachment>("attach_file", { path });
+        useMessages.setState((state) => ({ attachments: [...state.attachments, attachment] }));
+      } catch {
+        // run() already surfaced the rejection; keep attaching the remaining files.
+      }
     }
+  } catch (err) {
+    useMessages.getState().setError(String(err));
   }
 }
 

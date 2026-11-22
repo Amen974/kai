@@ -44,6 +44,7 @@ pub fn run() {
         })
         .manage(Mutex::new(ChatSession::default()))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             send_message,
             resend_message,

@@ -1,7 +1,6 @@
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ChatEvent, DownloadProgress, SessionSnapshot } from "../types";
-import { attachFiles, useMessages } from "../store/messages";
+import { useMessages } from "../store/messages";
 
 export async function setupChatEventListener(): Promise<() => void> {
   const unlistens: UnlistenFn[] = [];
@@ -78,13 +77,6 @@ export async function setupChatEventListener(): Promise<() => void> {
     }
   );
   unlistens.push(unlistenDownloadProgress);
-
-  const unlistenDragDrop = await getCurrentWebview().onDragDropEvent((event) => {
-    if (event.payload.type === "drop") {
-      void attachFiles(event.payload.paths);
-    }
-  });
-  unlistens.push(unlistenDragDrop);
 
   return () => {
     for (const unlisten of unlistens) {
