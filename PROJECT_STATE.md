@@ -1,7 +1,7 @@
 # PROJECT_STATE
 
 ## Overview
-`kai` is a local-first desktop AI chat app: Tauri 2 shell, React 19 + TypeScript + Tailwind 4 frontend, Rust backend, SQLite storage, and a local Ollama server (`http://localhost:11434`) for generation. Model is hardcoded to `qwen3:4b`.
+`kai` is a local-first desktop AI chat app: Tauri 2 shell, React 19 + TypeScript + Tailwind 4 frontend, Rust backend, SQLite storage, and a local Ollama server (`http://127.0.0.1:11434`) for generation. There is no hardcoded model: generation uses whichever row in the cached model catalog is marked active.
 
 ## Stack
 - Frontend: React 19, TypeScript (strict), Vite 8, Tailwind 4, Zustand 5, react-markdown + rehype-highlight.
@@ -15,6 +15,7 @@ npx tsc --noEmit      # typecheck
 npm run build         # typecheck + production bundle (tsc && vite build)
 npm run dev           # Vite dev server on port 1420
 npm run tauri dev     # desktop app (runs npm run dev first)
+npm run tauri build   # production binary + installers in src-tauri/target/release/bundle/
 ```
 Backend (`src-tauri/`):
 ```
@@ -27,7 +28,7 @@ Backend unit tests live in `state.rs`, `services/chat_service.rs`, `services/mod
 ## Structure
 
 ### Backend — `src-tauri/src/`
-- `lib.rs`: composition root. Initializes the DB pool, manages `Mutex<ChatSession>`, registers all 19 commands, and syncs the model catalog from Ollama on startup when the `models` table is empty (emitting `models_changed` when it did).
+- `lib.rs`: composition root. Initializes the DB pool (a failed initialization is returned from `setup` instead of panicking), manages `Mutex<ChatSession>`, registers all 19 commands, and syncs the model catalog from Ollama on startup when the `models` table is empty (emitting `models_changed` when it did).
 - `commands/chat_command.rs`: Tauri boundary (the only layer with `AppHandle`). Commands: `send_message`, `resend_message`, `edit_message`, `load_chat`, `switch_branch`, `get_variants`, `new_chat`, `delete_history`, `cancel_generation`, `get_session`, `get_history`, `search_history`. Also maps `ChatEvent` to Tauri events.
 - `commands/model_command.rs`: model catalog commands: `sync_models`, `download_model`, `cancel_model_download`, `delete_model`, `get_models`, `get_active_model`, `set_active_model`. `sync_models`, `delete_model` and `set_active_model` emit `models_changed`; `download_model` emits `model_download_progress` and resolves when the pull ends, whether it completed or was cancelled.
 - `services/model_service.rs`: all model catalog logic — fetches `/api/tags` plus `/api/show` for each model (vision check), caches the result in the `models` table, preserves or falls back the active selection,   and resolves the active model for generation. `sync_if_empty` reports whether it had to sync. `download_model` takes the download token from `ChatSession::begin_download`, streams a pull from Ollama as `ModelDownloadProgress` events, then re-syncs the catalog and emits `ModelsChanged`; a cancelled pull returns `false` before re-syncing. `cancel_download` cancels the active token. There is no downloadable-model catalog: Ollama only lists installed models, so `download_model` takes any model name from the caller.
@@ -36,14 +37,14 @@ Backend unit tests live in `state.rs`, `services/chat_service.rs`, `services/mod
 - `models/ai_model.rs`: `AiModel` (stored model details + `supports_vision` + `active`) and Ollama `/api/tags` / `/api/show` payload types.
 - `models/chat_model.rs`: `ChatMessage`, `Role` (`User` | `Assistant`), `SessionSnapshot`, `MessageVariant`, `GetHistory`, `ActiveStream`, Ollama request/response types.
 - `models/chat_event.rs`: `ChatEvent` enum sent to the UI (tagged `type`): snapshot, deltas, generation finished, error, `HistoryChanged`, `ModelsChanged`, `ModelDownloadProgress`.
-- `models/error_model.rs`: `ChatError`; serialized to the frontend as its message string.
+- `models/error_model.rs`: `ChatError`; serialized to the frontend as its message string. Ollama-specific variants carry the user guidance: `OllamaNotInstalled`, `OllamaNotRunning` and `ModelNotInstalled` (returned on a 404 from `/api/chat` or `/api/generate`).
 - `database/init.rs`: opens `kai.db`, sets WAL + foreign keys, applies migrations. `migrate` applies the migration set to any connection (used by the tests with an in-memory DB).
 - `database/repository.rs`: all SQL. Branch loading uses a recursive CTE from `branches.head_message_id` up through `parent_message_id`; `delete_last_message` moves the head to the new last message. Model catalog reads/writes: `get_models`, `replace_models`, `set_active_model`.
 - `database/migrations/001_initial_schema.sql`: `historys`, `branches`, `messages`.
 - `database/migrations/002_add_fts5.sql`: `history_fts5` virtual table plus triggers for history titles and `role = 'user'` messages.
 - `database/migrations/003_add_models.sql`: `models` table plus a partial unique index allowing only one `active` row.
 - `database/migrations/004_rename_historys.sql`: renames `historys` to `histories` and drops the unused `branches.name` column.
-- `ollama.rs`: `post_chat` (streaming `/api/chat`), `post_generate` (`/api/generate`, used for titles), `get_tags` (`/api/tags`), `show_model` (`/api/show`), `pull_model` (`/api/pull`, takes a `CancellationToken` and returns `Ok(false)` when cancelled, streaming NDJSON progress to a callback, including a final line without a trailing newline; an `error` field, a non-JSON error body, or a stream that ends without the final `success` status becomes `ChatError::ModelDownloadFailed`), `delete_model` (`DELETE /api/delete`).
+- `ollama.rs`: single `OLLAMA_BASE_URL` (`http://127.0.0.1:11434`) plus an `endpoint` helper, and `transport_error`, which turns connect/timeout failures into `OllamaNotInstalled` or `OllamaNotRunning` after checking `PATH` and the default install locations (nothing is installed automatically). `post_chat` (streaming `/api/chat`), `post_generate` (`/api/generate`, used for titles), `get_tags` (`/api/tags`), `show_model` (`/api/show`), `pull_model` (`/api/pull`, takes a `CancellationToken` and returns `Ok(false)` when cancelled, streaming NDJSON progress to a callback, including a final line without a trailing newline; an `error` field, a non-JSON error body, or a stream that ends without the final `success` status becomes `ChatError::ModelDownloadFailed`), `delete_model` (`DELETE /api/delete`).
 
 ### Frontend — `src/`
 - `App.tsx`: shell. Installs keymap + chat event listener, recovers session with `get_session`, renders `Home` when `messages.length === 0` and `Chat` otherwise, plus `InputBar`, `HistoryPanel`, `SideLabels`.
@@ -86,8 +87,17 @@ Backend unit tests live in `state.rs`, `services/chat_service.rs`, `services/mod
 - Assistant messages support markdown, syntax highlighting, copy, and collapsible thinking.
 - Frameless window (`decorations: false`) with drag region; ctrl+shift+m minimize, F11 fullscreen, ctrl+w close.
 
+## Distribution
+- `src-tauri/tauri.conf.json` sets product name `kai`, version `1.0.0`, identifier `com.aamen.kai`, bundle metadata (publisher, copyright, category, descriptions) and NSIS `installMode: currentUser`. `targets: "all"` resolves to NSIS + MSI on Windows and AppImage + deb on Linux.
+- User data lives in the per-user app data dir (`%APPDATA%\com.aamen.kai\kai.db` on Windows, `~/.local/share/com.aamen.kai/kai.db` on Linux); migrations are compiled in with `include_str!`, so no data files ship next to the binary.
+- `.github/workflows/release.yml` runs on `v*` tags: a `windows-latest` job builds `--bundles nsis,msi` and an `ubuntu-22.04` job builds `--bundles appimage,deb`, both uploading to a draft Release through `tauri-apps/tauri-action`. It uses only the built-in `GITHUB_TOKEN`.
+- `@tauri-apps/api` is pinned to `~2.11.0` because the Rust `tauri` crate is `2.11.x`; `tauri build` refuses to bundle when the NPM package and the crate are on different minor versions.
+- Ollama and models are deliberately not bundled; they are the user's responsibility, and the app only reports when they are missing.
+
 ## Known issues / open points
-- Ollama base URL is hardcoded in `ollama.rs`; no settings.
+- `app.security.csp` is still `null`; a Content Security Policy has not been added.
+- A database migrated by a newer build (`user_version` above 4, e.g. after the unmerged `attachments` commit) makes `database::init::init` fail; `setup` returns the error and Tauri aborts the process without any UI feedback. Fixing that needs a decision (native dialog dependency, or a data-version policy).
+- `src/Logo.tsx` is unused and points at `/Screenshot_2026-09-19_003350-removebg-preview.png`, which does not exist in `public/`.
 - No frontend tests; CI (`.github/workflows/cargo-test.yml`) runs `cargo test` in `src-tauri/` on every push, with build artifacts cached by `Swatinem/rust-cache`. Network-dependent chat paths (`generate`/`send`/`resend`/`edit` and title generation) have no tests, as do the Ollama-backed model catalog paths (`sync_models`, `download_model`, `delete_model`).
 - CI has run once on `main` (run 1, conclusion success), so the ubuntu `runs-on` image, the Tauri system package list and the `src-tauri` working directory are confirmed working on that run. `README.md` carries the cargo test status badge for this workflow.
 - CI uses `ubuntu-latest` (currently 24.04) instead of a pinned image, so a runner image change can alter the available Tauri packages.

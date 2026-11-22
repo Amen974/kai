@@ -26,7 +26,7 @@ mod state;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let pool = database::init::init(app.handle()).expect("Failed to initialize database");
+            let pool = database::init::init(app.handle())?;
             app.manage(std::sync::Mutex::new(pool));
 
             let handle = app.handle().clone();

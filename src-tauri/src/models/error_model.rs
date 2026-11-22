@@ -27,8 +27,17 @@ pub enum ChatError {
     #[error("model '{0}' not found")]
     ModelNotFound(String),
 
-    #[error("no active model selected")]
+    #[error("model '{0}' is not installed. Pull it with `ollama pull {0}` or from the model panel (ctrl+d)")]
+    ModelNotInstalled(String),
+
+    #[error("no model available. Pull one with `ollama pull <model>` or from the model panel (ctrl+d)")]
     NoActiveModel,
+
+    #[error("Ollama is not installed. Install it from https://ollama.com, then start it with `ollama serve`")]
+    OllamaNotInstalled,
+
+    #[error("Ollama is not responding on 127.0.0.1:11434. Start it with `ollama serve` and try again")]
+    OllamaNotRunning,
 
     #[error("failed to download model: {0}")]
     ModelDownloadFailed(String),

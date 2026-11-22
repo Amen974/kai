@@ -6,8 +6,7 @@
 
 A local-first desktop AI chat application that streams responses from a locally running Ollama server and stores conversations in SQLite.
 
-![alt text](public/home.png)
-![alt text](public/chat.png)
+![alt text](public/design.png)
 
 ## Features
 
@@ -42,6 +41,8 @@ A local-first desktop AI chat application that streams responses from a locally 
 - A Rust toolchain, plus the system dependencies required by Tauri 2 for your platform.
 - [Ollama](https://ollama.com) running locally on port `11434`, with at least one model pulled (for example `ollama pull qwen3:4b`).
 
+Ollama is **not** bundled with kai and no model is shipped with it. The app looks for Ollama on `127.0.0.1:11434` and reports whether it is missing or simply not running; models can be pulled from the model download panel (`ctrl+d`) or with `ollama pull <model>`.
+
 ### Install and run
 
 ```bash
@@ -63,6 +64,29 @@ None. The Ollama base URL is fixed in `src-tauri/src/ollama.rs`, and the app nee
 | --- | --- |
 | `npm run dev` | Start the Vite dev server on port 1420 (frontend only). |
 | `npm run build` | Typecheck with `tsc` and build the production frontend bundle with Vite. |
+| `npm run tauri build` | Build the production desktop binary and the platform installers. |
+
+## Building installers
+
+```bash
+npm ci
+npm run tauri build
+```
+
+Generated bundles:
+
+| Platform | Output |
+| --- | --- |
+| Windows | `src-tauri/target/release/bundle/nsis/kai_<version>_x64-setup.exe`, `src-tauri/target/release/bundle/msi/kai_<version>_x64_en-US.msi` |
+| Linux | `src-tauri/target/release/bundle/appimage/kai_<version>_amd64.AppImage`, `src-tauri/target/release/bundle/deb/kai_<version>_amd64.deb` |
+
+Linux packaging needs the Tauri system dependencies (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `patchelf`); build on Ubuntu 22.04 so the AppImage and `.deb` stay compatible with older distributions. To build just the two Linux formats, use `npm run tauri build -- --bundles appimage,deb`.
+
+The Windows NSIS installer installs per user, so no administrator rights are required. kai keeps its database in the per-user app data directory (`%APPDATA%\com.aamen.kai\kai.db` on Windows, `~/.local/share/com.aamen.kai/kai.db` on Linux); the install directory holds only the binary and the bundled frontend assets.
+
+## Releases
+
+Pushing a tag such as `v1.0.0` runs `.github/workflows/release.yml`, which builds the Windows (`.exe`, `.msi`) and Linux (`.AppImage`, `.deb`) installers and attaches them to a draft GitHub Release. Keep the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` identical to the tag before pushing it.
 
 ## Project structure
 

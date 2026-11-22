@@ -1190,7 +1190,10 @@ mod test {
             _ => panic!("expected Snapshot"),
         }
         match &events[1] {
-            ChatEvent::Error { message } => assert_eq!(message, "no active model selected"),
+            ChatEvent::Error { message } => assert_eq!(
+                message,
+                "no model available. Pull one with `ollama pull <model>` or from the model panel (ctrl+d)"
+            ),
             _ => panic!("expected Error"),
         }
     }
