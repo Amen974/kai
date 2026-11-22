@@ -1,5 +1,3 @@
-# kai
-
 [![cargo test](https://github.com/Amen974/kai/actions/workflows/cargo-test.yml/badge.svg)](https://github.com/Amen974/kai/actions/workflows/cargo-test.yml)
 
 # kai
@@ -57,18 +55,28 @@ The Vite dev server runs on port `1420` and is started automatically by `tauri d
 
 None. The Ollama base URL is fixed in `src-tauri/src/ollama.rs`, and the app needs no configuration file.
 
+## Tests
+
+Backend unit tests live in `src-tauri/` and run without Ollama:
+
+```bash
+cd src-tauri
+cargo test --lib
+```
+
 ## Available scripts
 
 | Script | Description |
 | --- | --- |
 | `npm run dev` | Start the Vite dev server on port 1420 (frontend only). |
 | `npm run build` | Typecheck with `tsc` and build the production frontend bundle with Vite. |
+| `npm run tauri dev` | Run the desktop app (starts the Vite dev server through Tauri). |
 
 ## Project structure
 
 ```text
 src/           React frontend: components, pages, Zustand stores, keymap, Tauri event listener
-src-tauri/     Rust backend: Tauri commands, services, Ollama client, SQLite repository and migrations
+src-tauri/     Rust backend: Tauri commands, services (chat, models, attachments), Ollama client, SQLite repository and migrations
 public/        Static assets (logo and background images)
 index.html     Vite entry HTML
 vite.config.ts Vite config with the fixed dev port used by Tauri

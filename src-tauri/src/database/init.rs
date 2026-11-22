@@ -8,6 +8,7 @@ const MIGRATIONS: &[M] = &[
     M::up(include_str!("migrations/002_add_fts5.sql")),
     M::up(include_str!("migrations/003_add_models.sql")),
     M::up(include_str!("migrations/004_rename_historys.sql")),
+    M::up(include_str!("migrations/005_add_attachments.sql")),
 ];
 
 const MIGRATOR: Migrations = Migrations::from_slice(MIGRATIONS);

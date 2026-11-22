@@ -2,6 +2,7 @@ use rusqlite::Connection;
 
 use crate::models::{
     ai_model::AiModel,
+    attachment_model::{Attachment, AttachmentKind},
     chat_model::{ChatMessage, GetHistory, MessageVariant, Role},
     error_model::ChatError,
 };
@@ -209,6 +210,40 @@ pub fn delete_last_message(
     Ok(())
 }
 
+pub fn insert_attachments(
+    pool: &std::sync::Mutex<Connection>,
+    message_id: u32,
+    attachments: &[Attachment],
+) -> Result<Vec<Attachment>, ChatError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let conn = pool.lock().map_err(|_| ChatError::LockPoisoned)?;
+    let mut stored = Vec::with_capacity(attachments.len());
+
+    for attachment in attachments {
+        let id: u32 = conn.query_row(
+            "INSERT INTO attachments (message_id, name, kind, mime_type, path, size_bytes, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING id",
+            (
+                message_id,
+                &attachment.name,
+                attachment.kind.as_str(),
+                &attachment.mime_type,
+                &attachment.path,
+                attachment.size_bytes,
+                &now,
+            ),
+            |row| row.get(0),
+        )?;
+
+        stored.push(Attachment {
+            id: Some(id),
+            ..attachment.clone()
+        });
+    }
+
+    Ok(stored)
+}
+
 pub fn load_branch(
     pool: &std::sync::Mutex<Connection>,
     branch_id: u32,
@@ -241,11 +276,49 @@ pub fn load_branch(
                 role,
                 content: row.get(3)?,
                 thinking: row.get(4)?,
+                attachments: Vec::new(),
+                images: None,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(chat_messages)
+    load_attachments(&conn, chat_messages)
+}
+
+fn load_attachments(
+    conn: &Connection,
+    mut messages: Vec<ChatMessage>,
+) -> Result<Vec<ChatMessage>, ChatError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, name, kind, mime_type, path, size_bytes
+         FROM attachments
+         WHERE message_id = ?1
+         ORDER BY id ASC",
+    )?;
+
+    for message in &mut messages {
+        let Some(message_id) = message.id else {
+            continue;
+        };
+
+        message.attachments = stmt
+            .query_map([message_id], |row| {
+                let kind_str: String = row.get(2)?;
+                let kind =
+                    AttachmentKind::from_str(&kind_str).ok_or(rusqlite::Error::InvalidQuery)?;
+                Ok(Attachment {
+                    id: Some(row.get(0)?),
+                    name: row.get(1)?,
+                    kind,
+                    mime_type: row.get(3)?,
+                    path: row.get(4)?,
+                    size_bytes: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+    }
+
+    Ok(messages)
 }
 
 pub fn get_variants(
@@ -533,6 +606,34 @@ mod test {
         assert_eq!(messages[1].parent_message_id, Some(user_id));
         assert_eq!(messages[1].thinking.as_deref(), Some("thinking"));
         assert!(matches!(messages[1].role, Role::Assistant));
+    }
+
+    #[test]
+    fn load_branch_returns_the_attachments_stored_for_each_message() {
+        let pool = in_memory_pool();
+        let (history_id, branch_id) = history_with_branch(&pool);
+        let user_id = append(&pool, history_id, branch_id, None, Role::User, "look");
+        let attachment = Attachment {
+            id: None,
+            name: "notes.txt".to_string(),
+            kind: AttachmentKind::Text,
+            mime_type: "text/plain".to_string(),
+            path: "/tmp/notes.txt".to_string(),
+            size_bytes: 12,
+        };
+
+        let stored = insert_attachments(&pool, user_id, &[attachment]).unwrap();
+        let persisted = load_branch(&pool, branch_id).unwrap();
+
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0].id.is_some());
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].attachments.len(), 1);
+        assert_eq!(persisted[0].attachments[0].id, stored[0].id);
+        assert_eq!(persisted[0].attachments[0].name, "notes.txt");
+        assert_eq!(persisted[0].attachments[0].kind, AttachmentKind::Text);
+        assert_eq!(persisted[0].attachments[0].mime_type, "text/plain");
+        assert_eq!(persisted[0].attachments[0].size_bytes, 12);
     }
 
     #[test]

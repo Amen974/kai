@@ -1,6 +1,7 @@
 use tokio_util::sync::CancellationToken;
 
 use crate::models::{
+    attachment_model::Attachment,
     chat_model::{
         ActiveStream, ChatMessage,
         Role::{Assistant, User},
@@ -17,6 +18,7 @@ pub struct ChatSession  {
     pub(crate) next_generation_id: u32,
     pub(crate) active_branch_id: Option<u32>,
     pub(crate) download: Option<CancellationToken>,
+    pub(crate) pending_attachments: Vec<Attachment>,
 }
 
 impl ChatSession {
@@ -53,6 +55,14 @@ impl ChatSession {
         self.download = None;
     }
 
+    pub fn add_pending_attachment(&mut self, attachment: Attachment) {
+        self.pending_attachments.push(attachment);
+    }
+
+    pub fn take_pending_attachments(&mut self) -> Vec<Attachment> {
+        std::mem::take(&mut self.pending_attachments)
+    }
+
     pub fn end_generation(&mut self, generation_id: u32) {
         if let Some(active) = &self.active {
             if active.generation_id == generation_id {
@@ -73,6 +83,8 @@ impl ChatSession {
             role: User,
             content,
             thinking: None,
+            attachments: Vec::new(),
+            images: None,
         };
 
         self.messages.push(user_message);
@@ -85,6 +97,8 @@ impl ChatSession {
             role: Assistant,
             content: String::new(),
             thinking: None,
+            attachments: Vec::new(),
+            images: None,
         };
 
         self.messages.push(assistant_placeholder);
@@ -159,6 +173,7 @@ impl ChatSession {
         self.history_id = Some(history_id);
         self.messages = messages;
         self.active_branch_id = Some(active_branch_id);
+        self.pending_attachments.clear();
     }
 
     pub fn reset(&mut self) {
@@ -166,6 +181,7 @@ impl ChatSession {
         self.messages.clear();
         self.active = None;
         self.active_branch_id = None;
+        self.pending_attachments.clear();
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
@@ -626,4 +642,79 @@ mod tests {
         assert!(snapshot.messages[0].content.is_empty());
         assert_eq!(session.messages[0].content, "later");
     }
+
+    fn attachment(name: &str) -> Attachment {
+        Attachment {
+            id: None,
+            name: name.to_string(),
+            kind: crate::models::attachment_model::AttachmentKind::Text,
+            mime_type: "text/plain".to_string(),
+            path: "/tmp/notes.txt".to_string(),
+            size_bytes: 12,
+        }
+    }
+
+    #[test]
+    fn add_pending_attachment_queues_each_attachment() {
+        let mut session = ChatSession::default();
+
+        session.add_pending_attachment(attachment("first.txt"));
+        session.add_pending_attachment(attachment("second.txt"));
+
+        assert_eq!(session.pending_attachments.len(), 2);
+        assert_eq!(session.pending_attachments[1].name, "second.txt");
+    }
+
+    #[test]
+    fn take_pending_attachments_returns_them_and_empties_the_queue() {
+        let mut session = ChatSession::default();
+        session.add_pending_attachment(attachment("notes.txt"));
+
+        let taken = session.take_pending_attachments();
+
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].name, "notes.txt");
+        assert!(session.pending_attachments.is_empty());
+    }
+
+    #[test]
+    fn take_pending_attachments_on_an_empty_queue_returns_nothing() {
+        let mut session = ChatSession::default();
+
+        assert!(session.take_pending_attachments().is_empty());
+    }
+
+    #[test]
+    fn replace_clears_pending_attachments() {
+        let mut session = ChatSession::default();
+        session.add_pending_attachment(attachment("notes.txt"));
+
+        session.replace(3, Vec::new(), 5);
+
+        assert!(session.pending_attachments.is_empty());
+    }
+
+    #[test]
+    fn reset_clears_pending_attachments() {
+        let mut session = ChatSession::default();
+        session.add_pending_attachment(attachment("notes.txt"));
+
+        session.reset();
+
+        assert!(session.pending_attachments.is_empty());
+    }
+
+    #[test]
+    fn new_messages_start_without_attachments_or_images() {
+        let mut session = ChatSession::default();
+
+        session.push_user("hello".to_string(), Some(1), None);
+        session.push_assistant_placeholder();
+
+        assert!(session.messages[0].attachments.is_empty());
+        assert!(session.messages[0].images.is_none());
+        assert!(session.messages[1].attachments.is_empty());
+        assert!(session.messages[1].images.is_none());
+    }
+
 }

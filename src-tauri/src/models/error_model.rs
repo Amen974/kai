@@ -36,6 +36,25 @@ pub enum ChatError {
     #[error("a model download is active")]
     DownloadActive,
 
+    #[error("unsupported attachment type '{0}'")]
+    UnsupportedAttachmentType(String),
+
+    #[error("cannot read attachment path")]
+    InvalidAttachmentPath,
+
+    #[error("attachment '{name}' is {size_bytes} bytes, above the {limit} byte limit")]
+    AttachmentTooLarge {
+        name: String,
+        size_bytes: u64,
+        limit: u64,
+    },
+
+    #[error("attachment '{0}' is empty")]
+    EmptyAttachment(String),
+
+    #[error("model '{0}' cannot read images")]
+    AttachmentNeedsVisionModel(String),
+
     #[error(transparent)]
     Db(#[from] rusqlite::Error),
 
@@ -47,6 +66,9 @@ pub enum ChatError {
 
     #[error("invalid UTF-8 in stream: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 
     #[error(transparent)]
     Tauri(#[from] tauri::Error),
