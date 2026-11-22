@@ -165,7 +165,7 @@ pub async fn get_variants(
 pub async fn new_chat(
     chat_session: State<'_, Mutex<ChatSession>>,
 ) -> Result<SessionSnapshot, ChatError> {
-    Ok(chat_service::new_chat(&chat_session).await)
+    chat_service::new_chat(&chat_session).await
 }
 
 #[tauri::command]

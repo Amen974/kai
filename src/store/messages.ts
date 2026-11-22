@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
+  Attachment,
   ChatEvent,
   DownloadProgress,
   Message,
@@ -15,6 +17,7 @@ export interface ChatState {
   historyId: number | null;
   activeBranchId: number | null;
   variantsByParentId: Record<string, MessageVariant[]>;
+  attachments: Attachment[];
   models: ModelInfo[];
   download: DownloadProgress | null;
   isGenerating: boolean;
@@ -42,6 +45,7 @@ export function chatReducer(state: ChatState, event: ChatEvent): Partial<ChatSta
     case "Snapshot": {
       const updates: Partial<ChatState> = {
         messages: event.messages,
+        attachments: [],
         error: null,
       };
       if (event.history_id !== undefined) {
@@ -113,6 +117,7 @@ export const useMessages = create<ChatState>((set) => ({
   historyId: null,
   activeBranchId: null,
   variantsByParentId: {},
+  attachments: [],
   models: [],
   download: null,
   isGenerating: false,
@@ -177,6 +182,38 @@ export async function switchBranch(branchId: number): Promise<void> {
     useUI.getState().forceScrollPin();
   } catch (err) {
     console.error("Failed to switch branch:", err);
+  }
+}
+
+export async function pickAttachments(): Promise<void> {
+  try {
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: "Text or image", extensions: ["txt", "png", "jpg", "jpeg", "webp", "gif"] }],
+    });
+    if (!selected) return;
+
+    for (const path of Array.isArray(selected) ? selected : [selected]) {
+      try {
+        const attachment = await run<Attachment>("attach_file", { path });
+        useMessages.setState((state) => ({ attachments: [...state.attachments, attachment] }));
+      } catch {
+        // run() already surfaced the rejection; keep attaching the remaining files.
+      }
+    }
+  } catch (err) {
+    useMessages.getState().setError(String(err));
+  }
+}
+
+export async function detachAttachment(attachment: Attachment): Promise<void> {
+  try {
+    await run("remove_pending_attachment", { path: attachment.path });
+    useMessages.setState((state) => ({
+      attachments: state.attachments.filter((item) => item.path !== attachment.path),
+    }));
+  } catch (err) {
+    console.error("Failed to detach attachment:", err);
   }
 }
 
