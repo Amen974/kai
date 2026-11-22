@@ -632,3 +632,979 @@ pub async fn create_title(
     update_title(pool, &response, id)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::database::repository::get_history;
+    use std::cell::RefCell;
+
+    fn session_ready_for_generation() -> (ChatSession, u32) {
+        let mut session = ChatSession::default();
+        let (generation_id, _) = session.begin_generation().unwrap();
+        session.push_assistant_placeholder();
+        (session, generation_id)
+    }
+
+    #[test]
+    fn line_buffer_returns_none_until_a_newline_arrives() {
+        let mut buffer = LineBuffer::new();
+
+        buffer.push_bytes(b"{\"done\"");
+
+        assert!(buffer.next_line().is_none());
+    }
+
+    #[test]
+    fn line_buffer_yields_each_line_without_its_newline() {
+        let mut buffer = LineBuffer::new();
+
+        buffer.push_bytes(b"first\nsecond\nthird");
+
+        assert_eq!(buffer.next_line().unwrap().unwrap(), "first");
+        assert_eq!(buffer.next_line().unwrap().unwrap(), "second");
+        assert!(buffer.next_line().is_none());
+
+        buffer.push_bytes(b" line\n");
+
+        assert_eq!(buffer.next_line().unwrap().unwrap(), "third line");
+    }
+
+    #[test]
+    fn line_buffer_yields_empty_line_for_a_lone_newline() {
+        let mut buffer = LineBuffer::new();
+
+        buffer.push_bytes(b"\n");
+
+        assert_eq!(buffer.next_line().unwrap().unwrap(), "");
+    }
+
+    #[test]
+    fn line_buffer_reports_invalid_utf8() {
+        let mut buffer = LineBuffer::new();
+
+        buffer.push_bytes(b"\xff\n");
+
+        let result = buffer.next_line().unwrap();
+
+        assert!(matches!(result, Err(ChatError::Utf8(_))));
+        assert!(buffer.next_line().is_none());
+    }
+
+    #[test]
+    fn parse_line_ignores_empty_and_blank_lines() {
+        assert!(matches!(parse_line(""), Ok(None)));
+        assert!(matches!(parse_line("   "), Ok(None)));
+    }
+
+    #[test]
+    fn parse_line_parses_message_and_done_flag() {
+        let response = parse_line(r#"{"message":{"content":"hi","thinking":"hmm"},"done":true}"#)
+            .unwrap()
+            .unwrap();
+
+        let message = response.message.unwrap();
+
+        assert_eq!(message.content, "hi");
+        assert_eq!(message.thinking.as_deref(), Some("hmm"));
+        assert!(response.done);
+    }
+
+    #[test]
+    fn parse_line_defaults_missing_thinking_to_none() {
+        let response = parse_line(r#"{"message":{"content":"hi"},"done":false}"#)
+            .unwrap()
+            .unwrap();
+
+        assert!(response.message.unwrap().thinking.is_none());
+    }
+
+    #[test]
+    fn parse_line_fails_on_invalid_json() {
+        let result = parse_line("not json");
+
+        assert!(matches!(result, Err(ChatError::Json(_))));
+    }
+
+    #[test]
+    fn apply_chunk_appends_content_and_emits_a_delta() {
+        let (mut session, generation_id) = session_ready_for_generation();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+        let msg = OllamaMessage {
+            content: "hello".to_string(),
+            thinking: None,
+        };
+
+        let applied = apply_chunk(msg, generation_id, &mut session, &callback);
+
+        assert!(applied);
+        assert_eq!(session.messages[0].content, "hello");
+        let events = events.into_inner();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::ContentDelta { content } => assert_eq!(content, "hello"),
+            _ => panic!("expected ContentDelta"),
+        }
+    }
+
+    #[test]
+    fn apply_chunk_appends_thinking_and_emits_a_delta() {
+        let (mut session, generation_id) = session_ready_for_generation();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+        let msg = OllamaMessage {
+            content: String::new(),
+            thinking: Some("hmm".to_string()),
+        };
+
+        let applied = apply_chunk(msg, generation_id, &mut session, &callback);
+
+        assert!(applied);
+        assert_eq!(session.messages[0].thinking.as_deref(), Some("hmm"));
+        assert!(session.messages[0].content.is_empty());
+        let events = events.into_inner();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::ThinkingDelta { thinking } => assert_eq!(thinking, "hmm"),
+            _ => panic!("expected ThinkingDelta"),
+        }
+    }
+
+    #[test]
+    fn apply_chunk_emits_thinking_before_content() {
+        let (mut session, generation_id) = session_ready_for_generation();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+        let msg = OllamaMessage {
+            content: "answer".to_string(),
+            thinking: Some("thought".to_string()),
+        };
+
+        let applied = apply_chunk(msg, generation_id, &mut session, &callback);
+
+        assert!(applied);
+        assert_eq!(session.messages[0].thinking.as_deref(), Some("thought"));
+        assert_eq!(session.messages[0].content, "answer");
+        let events = events.into_inner();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], ChatEvent::ThinkingDelta { .. }));
+        assert!(matches!(events[1], ChatEvent::ContentDelta { .. }));
+    }
+
+    #[test]
+    fn apply_chunk_ignores_empty_fields() {
+        let (mut session, generation_id) = session_ready_for_generation();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+        let msg = OllamaMessage {
+            content: String::new(),
+            thinking: Some(String::new()),
+        };
+
+        let applied = apply_chunk(msg, generation_id, &mut session, &callback);
+
+        assert!(applied);
+        assert!(session.messages[0].content.is_empty());
+        assert!(session.messages[0].thinking.is_none());
+        assert!(events.into_inner().is_empty());
+    }
+
+    #[test]
+    fn apply_chunk_returns_false_for_stale_generation_id() {
+        let (mut session, generation_id) = session_ready_for_generation();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+        let msg = OllamaMessage {
+            content: "hello".to_string(),
+            thinking: None,
+        };
+
+        let applied = apply_chunk(msg, generation_id + 1, &mut session, &callback);
+
+        assert!(!applied);
+        assert!(session.messages[0].content.is_empty());
+        assert!(events.into_inner().is_empty());
+    }
+
+    #[test]
+    fn apply_chunk_returns_false_without_messages() {
+        let mut session = ChatSession::default();
+        let (generation_id, _) = session.begin_generation().unwrap();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+        let msg = OllamaMessage {
+            content: "hello".to_string(),
+            thinking: None,
+        };
+
+        let applied = apply_chunk(msg, generation_id, &mut session, &callback);
+
+        assert!(!applied);
+        assert!(session.messages.is_empty());
+        assert!(events.into_inner().is_empty());
+    }
+
+    #[test]
+    fn snapshot_event_carries_session_state() {
+        let mut session = ChatSession::default();
+        session.replace(3, Vec::new(), 5);
+        session.push_user("hello".to_string(), Some(1), None);
+
+        let event = snapshot_event(&session);
+
+        match event {
+            ChatEvent::Snapshot {
+                history_id,
+                messages,
+                generating,
+                active_branch_id,
+            } => {
+                assert_eq!(history_id, Some(3));
+                assert_eq!(messages.len(), 1);
+                assert_eq!(messages[0].content, "hello");
+                assert!(!generating);
+                assert_eq!(active_branch_id, Some(5));
+            }
+            _ => panic!("expected Snapshot"),
+        }
+    }
+
+    #[test]
+    fn snapshot_event_reports_generating_while_active() {
+        let (session, _) = session_ready_for_generation();
+
+        let event = snapshot_event(&session);
+
+        match event {
+            ChatEvent::Snapshot {
+                messages, generating, ..
+            } => {
+                assert_eq!(messages.len(), 1);
+                assert!(generating);
+            }
+            _ => panic!("expected Snapshot"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_generation_cancels_the_active_token() {
+        let session = Mutex::new(ChatSession::default());
+        let token = {
+            let mut state = session.lock().await;
+            state.begin_generation().unwrap().1
+        };
+
+        cancel_generation(&session).await;
+
+        assert!(token.is_cancelled());
+        assert!(session.lock().await.active.is_some());
+    }
+
+        #[tokio::test]
+    async fn cancel_generation_on_idle_session_is_a_noop() {
+        let session = Mutex::new(ChatSession::default());
+
+        cancel_generation(&session).await;
+
+        assert!(session.lock().await.active.is_none());
+    }
+
+    fn in_memory_pool() -> std::sync::Mutex<Connection> {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", "ON")
+            .unwrap();
+        crate::database::init::migrate(&mut connection).unwrap();
+        std::sync::Mutex::new(connection)
+    }
+
+    /// Persists a user message through the real code path, then opens a generation with an
+    /// empty assistant placeholder, so finalize_generation has real rows to write against.
+    async fn session_ready_to_finalize(
+        pool: &std::sync::Mutex<Connection>,
+    ) -> (Mutex<ChatSession>, u32, u32) {
+        let session = Mutex::new(ChatSession::default());
+        let callback = |_: ChatEvent| {};
+
+        record_user_message(&session, pool, &"hello".to_string(), &callback)
+            .await
+            .unwrap();
+
+        let (generation_id, user_message_id) = {
+            let mut state = session.lock().await;
+            let (generation_id, _) = state.begin_generation().unwrap();
+            state.push_assistant_placeholder();
+            (generation_id, state.messages[0].id.unwrap())
+        };
+
+        (session, generation_id, user_message_id)
+    }
+
+    #[tokio::test]
+    async fn finalize_generation_done_persists_the_assistant_message() {
+        let pool = in_memory_pool();
+        let (session, generation_id, user_message_id) = session_ready_to_finalize(&pool).await;
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        {
+            let mut state = session.lock().await;
+            assert!(state.append_thinking(generation_id, "I thought".to_string()));
+            assert!(state.append_content(generation_id, "Hi there".to_string()));
+        }
+
+        finalize_generation(StopReason::Done, generation_id, &session, &pool, &callback)
+            .await
+            .unwrap();
+
+        let state = session.lock().await;
+        let branch_id = state.active_branch_id.unwrap();
+        assert!(!state.snapshot().generating);
+        assert_eq!(state.messages.len(), 2);
+        let assistant = &state.messages[1];
+        assert!(matches!(assistant.role, Assistant));
+        assert_eq!(assistant.content, "Hi there");
+        assert_eq!(assistant.parent_message_id, Some(user_message_id));
+        let assistant_id = assistant.id.unwrap();
+
+        assert_eq!(get_head_message_id(&pool, branch_id).unwrap(), Some(assistant_id));
+
+        let persisted = load_branch(&pool, branch_id).unwrap();
+        assert_eq!(persisted.len(), 2);
+        assert_eq!(persisted[1].content, "Hi there");
+        assert_eq!(persisted[1].thinking.as_deref(), Some("I thought"));
+        drop(state);
+
+        let events = events.into_inner();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::GenerationFinished { reason } => assert_eq!(reason, "done"),
+            _ => panic!("expected GenerationFinished"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_generation_done_reports_a_persist_error() {
+        let pool = in_memory_pool();
+        let session = Mutex::new(ChatSession::default());
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+        let generation_id = {
+            let mut state = session.lock().await;
+            let (generation_id, _) = state.begin_generation().unwrap();
+            state.push_assistant_placeholder();
+            generation_id
+        };
+
+        let result =
+            finalize_generation(StopReason::Done, generation_id, &session, &pool, &callback).await;
+
+        assert!(matches!(result, Err(ChatError::NoActiveBranch)));
+        assert!(!session.lock().await.snapshot().generating);
+
+        let events = events.into_inner();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::Error { message } => assert_eq!(message, "no active branch"),
+            _ => panic!("expected Error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_generation_cancelled_persists_partial_content() {
+        let pool = in_memory_pool();
+        let (session, generation_id, user_message_id) = session_ready_to_finalize(&pool).await;
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        session
+            .lock()
+            .await
+            .append_content(generation_id, "partial".to_string());
+
+        finalize_generation(StopReason::Cancelled, generation_id, &session, &pool, &callback)
+            .await
+            .unwrap();
+
+        let state = session.lock().await;
+        let branch_id = state.active_branch_id.unwrap();
+        assert!(!state.snapshot().generating);
+        assert_eq!(state.messages.len(), 2);
+        assert_eq!(state.messages[1].content, "partial");
+
+        let persisted = load_branch(&pool, branch_id).unwrap();
+        assert_eq!(persisted.len(), 2);
+        assert!(matches!(persisted[1].role, Assistant));
+        assert_eq!(persisted[1].content, "partial");
+        assert_eq!(persisted[1].parent_message_id, Some(user_message_id));
+        drop(state);
+
+        let events = events.into_inner();
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            ChatEvent::Snapshot { messages, generating, .. } => {
+                assert_eq!(messages.len(), 2);
+                assert!(!generating);
+            }
+            _ => panic!("expected Snapshot"),
+        }
+        match &events[1] {
+            ChatEvent::GenerationFinished { reason } => assert_eq!(reason, "cancelled"),
+            _ => panic!("expected GenerationFinished"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_generation_cancelled_drops_an_empty_placeholder() {
+        let pool = in_memory_pool();
+        let (session, generation_id, _) = session_ready_to_finalize(&pool).await;
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        finalize_generation(StopReason::Cancelled, generation_id, &session, &pool, &callback)
+            .await
+            .unwrap();
+
+        let state = session.lock().await;
+        let branch_id = state.active_branch_id.unwrap();
+        assert_eq!(state.messages.len(), 1);
+        assert!(matches!(state.messages[0].role, User));
+
+        let persisted = load_branch(&pool, branch_id).unwrap();
+        assert_eq!(persisted.len(), 1);
+        drop(state);
+
+        let events = events.into_inner();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], ChatEvent::Snapshot { .. }));
+        match &events[1] {
+            ChatEvent::GenerationFinished { reason } => assert_eq!(reason, "cancelled"),
+            _ => panic!("expected GenerationFinished"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_generation_eof_persists_partial_content() {
+        let pool = in_memory_pool();
+        let (session, generation_id, _) = session_ready_to_finalize(&pool).await;
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        session
+            .lock()
+            .await
+            .append_content(generation_id, "cut off".to_string());
+
+        finalize_generation(StopReason::Eof, generation_id, &session, &pool, &callback)
+            .await
+            .unwrap();
+
+        let state = session.lock().await;
+        let branch_id = state.active_branch_id.unwrap();
+        assert_eq!(state.messages.len(), 2);
+
+        let persisted = load_branch(&pool, branch_id).unwrap();
+        assert_eq!(persisted.len(), 2);
+        assert_eq!(persisted[1].content, "cut off");
+        drop(state);
+
+        let events = events.into_inner();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], ChatEvent::Snapshot { .. }));
+        match &events[1] {
+            ChatEvent::GenerationFinished { reason } => assert_eq!(reason, "eof"),
+            _ => panic!("expected GenerationFinished"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_generation_eof_drops_an_empty_placeholder() {
+        let pool = in_memory_pool();
+        let (session, generation_id, _) = session_ready_to_finalize(&pool).await;
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        finalize_generation(StopReason::Eof, generation_id, &session, &pool, &callback)
+            .await
+            .unwrap();
+
+        let state = session.lock().await;
+        let branch_id = state.active_branch_id.unwrap();
+        assert_eq!(state.messages.len(), 1);
+        assert!(load_branch(&pool, branch_id).unwrap().len() == 1);
+        drop(state);
+
+        let events = events.into_inner();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[0], ChatEvent::Snapshot { .. }));
+        match &events[1] {
+            ChatEvent::GenerationFinished { reason } => assert_eq!(reason, "eof"),
+            _ => panic!("expected GenerationFinished"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_generation_error_keeps_content_without_persisting_it() {
+        let pool = in_memory_pool();
+        let (session, generation_id, _) = session_ready_to_finalize(&pool).await;
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        session
+            .lock()
+            .await
+            .append_content(generation_id, "partial".to_string());
+
+        let result = finalize_generation(
+            StopReason::Error(ChatError::NoActiveModel),
+            generation_id,
+            &session,
+            &pool,
+            &callback,
+        )
+        .await;
+
+        assert!(matches!(result, Err(ChatError::NoActiveModel)));
+
+        let state = session.lock().await;
+        let branch_id = state.active_branch_id.unwrap();
+        assert!(!state.snapshot().generating);
+        assert_eq!(state.messages.len(), 2);
+        assert_eq!(state.messages[1].content, "partial");
+        assert!(load_branch(&pool, branch_id).unwrap().len() == 1);
+        drop(state);
+
+        let events = events.into_inner();
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            ChatEvent::Snapshot { messages, generating, .. } => {
+                assert_eq!(messages.len(), 2);
+                assert!(!generating);
+            }
+            _ => panic!("expected Snapshot"),
+        }
+        match &events[1] {
+            ChatEvent::Error { message } => assert_eq!(message, "no active model selected"),
+            _ => panic!("expected Error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn finalize_generation_error_drops_an_empty_placeholder() {
+        let pool = in_memory_pool();
+        let (session, generation_id, _) = session_ready_to_finalize(&pool).await;
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        let result = finalize_generation(
+            StopReason::Error(ChatError::NoActiveModel),
+            generation_id,
+            &session,
+            &pool,
+            &callback,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(session.lock().await.messages.len(), 1);
+        assert_eq!(events.into_inner().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn persist_assistant_without_a_branch_fails() {
+        let pool = in_memory_pool();
+        let session = Mutex::new(ChatSession::default());
+        session.lock().await.push_assistant_placeholder();
+
+        let result = persist_assistant(&session, &pool).await;
+
+        assert!(matches!(result, Err(ChatError::NoActiveBranch)));
+    }
+
+    #[tokio::test]
+    async fn persist_assistant_without_a_message_fails() {
+        let pool = in_memory_pool();
+        let session = Mutex::new(ChatSession::default());
+        let callback = |_: ChatEvent| {};
+
+        record_user_message(&session, &pool, &"hello".to_string(), &callback)
+            .await
+            .unwrap();
+        session.lock().await.messages.clear();
+
+        let result = persist_assistant(&session, &pool).await;
+
+        assert!(matches!(result, Err(ChatError::NoMessage)));
+        assert!(get_history(&pool).unwrap().len() == 1);
+    }
+
+    #[tokio::test]
+    async fn consume_stream_returns_done_and_applies_every_chunk() {
+        let session = Mutex::new(ChatSession::default());
+        let generation_id = {
+            let mut state = session.lock().await;
+            let (generation_id, _) = state.begin_generation().unwrap();
+            state.push_assistant_placeholder();
+            generation_id
+        };
+        let token = CancellationToken::new();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+        let stream = futures_util::stream::iter(vec![
+            Ok::<Bytes, reqwest::Error>(Bytes::from_static(
+                b"{\"message\":{\"content\":\"hel\",\"thinking\":\"th\"},\"done\":false}\n",
+            )),
+            Ok::<Bytes, reqwest::Error>(Bytes::from_static(
+                b"{\"message\":{\"content\":\"lo\"},\"done\":true}\n",
+            )),
+        ]);
+
+        let reason = consume_stream(stream, &token, generation_id, &session, &callback).await;
+
+        assert!(matches!(reason, StopReason::Done));
+        let state = session.lock().await;
+        assert_eq!(state.messages[0].content, "hello");
+        assert_eq!(state.messages[0].thinking.as_deref(), Some("th"));
+    }
+
+    #[tokio::test]
+    async fn consume_stream_reassembles_a_line_split_across_chunks() {
+        let session = Mutex::new(ChatSession::default());
+        let generation_id = {
+            let mut state = session.lock().await;
+            let (generation_id, _) = state.begin_generation().unwrap();
+            state.push_assistant_placeholder();
+            generation_id
+        };
+        let token = CancellationToken::new();
+        let callback = |_: ChatEvent| {};
+        let stream = futures_util::stream::iter(vec![
+            Ok::<Bytes, reqwest::Error>(Bytes::from_static(
+                b"{\"message\":{\"content\":\"hi\"},\"do",
+            )),
+            Ok::<Bytes, reqwest::Error>(Bytes::from_static(b"ne\":true}\n")),
+        ]);
+
+        let reason = consume_stream(stream, &token, generation_id, &session, &callback).await;
+
+        assert!(matches!(reason, StopReason::Done));
+        assert_eq!(session.lock().await.messages[0].content, "hi");
+    }
+
+    #[tokio::test]
+    async fn consume_stream_reports_eof_when_the_stream_ends_without_done() {
+        let session = Mutex::new(ChatSession::default());
+        let generation_id = {
+            let mut state = session.lock().await;
+            let (generation_id, _) = state.begin_generation().unwrap();
+            state.push_assistant_placeholder();
+            generation_id
+        };
+        let token = CancellationToken::new();
+        let callback = |_: ChatEvent| {};
+        let stream = futures_util::stream::iter(vec![Ok::<Bytes, reqwest::Error>(
+            Bytes::from_static(b"{\"message\":{\"content\":\"cut\"},\"done\":false}\n"),
+        )]);
+
+        let reason = consume_stream(stream, &token, generation_id, &session, &callback).await;
+
+        assert!(matches!(reason, StopReason::Eof));
+        assert_eq!(session.lock().await.messages[0].content, "cut");
+    }
+
+    #[tokio::test]
+    async fn consume_stream_stops_when_the_token_is_cancelled() {
+        let session = Mutex::new(ChatSession::default());
+        let generation_id = {
+            let mut state = session.lock().await;
+            let (generation_id, _) = state.begin_generation().unwrap();
+            state.push_assistant_placeholder();
+            generation_id
+        };
+        let token = CancellationToken::new();
+        token.cancel();
+        let callback = |_: ChatEvent| {};
+        let stream = futures_util::stream::pending::<Result<Bytes, reqwest::Error>>();
+
+        let reason = consume_stream(stream, &token, generation_id, &session, &callback).await;
+
+        assert!(matches!(reason, StopReason::Cancelled));
+        assert!(session.lock().await.messages[0].content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn consume_stream_reports_invalid_json() {
+        let session = Mutex::new(ChatSession::default());
+        let generation_id = {
+            let mut state = session.lock().await;
+            let (generation_id, _) = state.begin_generation().unwrap();
+            state.push_assistant_placeholder();
+            generation_id
+        };
+        let token = CancellationToken::new();
+        let callback = |_: ChatEvent| {};
+        let stream = futures_util::stream::iter(vec![Ok::<Bytes, reqwest::Error>(
+            Bytes::from_static(b"not json\n"),
+        )]);
+
+        let reason = consume_stream(stream, &token, generation_id, &session, &callback).await;
+
+        assert!(matches!(reason, StopReason::Error(ChatError::Json(_))));
+    }
+
+    #[tokio::test]
+    async fn consume_stream_ends_when_the_generation_id_is_stale() {
+        let session = Mutex::new(ChatSession::default());
+        let generation_id = {
+            let mut state = session.lock().await;
+            let (generation_id, _) = state.begin_generation().unwrap();
+            state.push_assistant_placeholder();
+            generation_id
+        };
+        let token = CancellationToken::new();
+        let callback = |_: ChatEvent| {};
+        let stream = futures_util::stream::iter(vec![Ok::<Bytes, reqwest::Error>(
+            Bytes::from_static(b"{\"message\":{\"content\":\"stale\"},\"done\":false}\n"),
+        )]);
+
+        let reason =
+            consume_stream(stream, &token, generation_id + 1, &session, &callback).await;
+
+        assert!(matches!(reason, StopReason::Eof));
+        assert!(session.lock().await.messages[0].content.is_empty());
+    }
+
+    #[tokio::test]
+    async fn new_chat_clears_the_current_session() {
+        let pool = in_memory_pool();
+        let session = Mutex::new(ChatSession::default());
+        let callback = |_: ChatEvent| {};
+
+        record_user_message(&session, &pool, &"hello".to_string(), &callback)
+            .await
+            .unwrap();
+
+        let snapshot = new_chat(&session).await;
+
+        assert!(snapshot.history_id.is_none());
+        assert!(snapshot.messages.is_empty());
+        assert!(snapshot.active_branch_id.is_none());
+        assert!(!snapshot.generating);
+        assert!(session.lock().await.messages.is_empty());
+        assert_eq!(get_history(&pool).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn get_session_returns_the_current_snapshot() {
+        let pool = in_memory_pool();
+        let session = Mutex::new(ChatSession::default());
+        let callback = |_: ChatEvent| {};
+
+        record_user_message(&session, &pool, &"hello".to_string(), &callback)
+            .await
+            .unwrap();
+
+        let snapshot = get_session(&session).await;
+
+        let (history_id, branch_id) = {
+            let state = session.lock().await;
+            (state.history_id.unwrap(), state.active_branch_id.unwrap())
+        };
+        assert_eq!(snapshot.history_id, Some(history_id));
+        assert_eq!(snapshot.active_branch_id, Some(branch_id));
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].content, "hello");
+        assert!(!snapshot.generating);
+    }
+
+    #[tokio::test]
+    async fn record_user_message_creates_history_branch_and_message() {
+        let session = Mutex::new(ChatSession::default());
+        let pool = in_memory_pool();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        let (is_new, message_id) =
+            record_user_message(&session, &pool, &"hello".to_string(), &callback)
+                .await
+                .unwrap();
+
+        assert!(is_new);
+
+        let state = session.lock().await;
+        let history_id = state.history_id.unwrap();
+        let branch_id = state.active_branch_id.unwrap();
+        assert_eq!(state.messages.len(), 1);
+        let message = &state.messages[0];
+        assert_eq!(message.id, Some(message_id));
+        assert_eq!(message.parent_message_id, None);
+        assert!(matches!(message.role, User));
+        assert_eq!(message.content, "hello");
+
+        assert_eq!(get_head_message_id(&pool, branch_id).unwrap(), Some(message_id));
+        assert_eq!(get_active_branch(&pool, history_id).unwrap(), branch_id);
+
+        let persisted = load_branch(&pool, branch_id).unwrap();
+        assert_eq!(persisted.len(), 1);
+        assert_eq!(persisted[0].id, Some(message_id));
+        assert_eq!(persisted[0].content, "hello");
+
+        let events = events.into_inner();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            ChatEvent::Snapshot {
+                history_id: emitted_history_id,
+                messages,
+                generating,
+                active_branch_id,
+            } => {
+                assert_eq!(*emitted_history_id, Some(history_id));
+                assert_eq!(messages.len(), 1);
+                assert!(!generating);
+                assert_eq!(*active_branch_id, Some(branch_id));
+            }
+            _ => panic!("expected Snapshot"),
+        }
+    }
+
+    #[tokio::test]
+    async fn record_user_message_chains_a_second_message_onto_the_branch_head() {
+        let session = Mutex::new(ChatSession::default());
+        let pool = in_memory_pool();
+        let callback = |_: ChatEvent| {};
+
+        let (_, first_id) = record_user_message(&session, &pool, &"first".to_string(), &callback)
+            .await
+            .unwrap();
+        let (is_new, second_id) =
+            record_user_message(&session, &pool, &"second".to_string(), &callback)
+                .await
+                .unwrap();
+
+        assert!(!is_new);
+
+        let state = session.lock().await;
+        let branch_id = state.active_branch_id.unwrap();
+        assert_eq!(state.messages.len(), 2);
+        assert_eq!(state.messages[1].id, Some(second_id));
+        assert_eq!(state.messages[1].parent_message_id, Some(first_id));
+
+        assert_eq!(get_head_message_id(&pool, branch_id).unwrap(), Some(second_id));
+        assert_eq!(get_history(&pool).unwrap().len(), 1);
+
+        let persisted = load_branch(&pool, branch_id).unwrap();
+        let contents: Vec<&str> = persisted.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(contents, vec!["first", "second"]);
+        assert_eq!(persisted[1].parent_message_id, Some(first_id));
+    }
+
+    #[tokio::test]
+    async fn record_user_message_rejects_blank_content_without_persisting() {
+        let session = Mutex::new(ChatSession::default());
+        let pool = in_memory_pool();
+        let events = RefCell::new(Vec::new());
+        let callback = |event| events.borrow_mut().push(event);
+
+        let result = record_user_message(&session, &pool, &"   ".to_string(), &callback).await;
+
+        assert!(matches!(result, Err(ChatError::EmptyMessage)));
+
+        let state = session.lock().await;
+        assert!(state.history_id.is_none());
+        assert!(state.active_branch_id.is_none());
+        assert!(state.messages.is_empty());
+
+        assert!(get_history(&pool).unwrap().is_empty());
+        assert!(events.into_inner().is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_chat_restores_the_persisted_branch() {
+        let pool = in_memory_pool();
+        let writer = Mutex::new(ChatSession::default());
+        let callback = |_: ChatEvent| {};
+
+        record_user_message(&writer, &pool, &"hello".to_string(), &callback)
+            .await
+            .unwrap();
+
+        let (history_id, branch_id) = {
+            let state = writer.lock().await;
+            (state.history_id.unwrap(), state.active_branch_id.unwrap())
+        };
+
+        let reader = Mutex::new(ChatSession::default());
+        let snapshot = load_chat(history_id, &reader, &pool).await.unwrap();
+
+        assert_eq!(snapshot.history_id, Some(history_id));
+        assert_eq!(snapshot.active_branch_id, Some(branch_id));
+        assert!(!snapshot.generating);
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].content, "hello");
+        assert!(matches!(snapshot.messages[0].role, User));
+    }
+
+    #[tokio::test]
+    async fn switch_branch_loads_its_messages_and_persists_the_selection() {
+        let session = Mutex::new(ChatSession::default());
+        let pool = in_memory_pool();
+        let callback = |_: ChatEvent| {};
+
+        record_user_message(&session, &pool, &"main".to_string(), &callback)
+            .await
+            .unwrap();
+
+        let (history_id, first_branch_id) = {
+            let state = session.lock().await;
+            (state.history_id.unwrap(), state.active_branch_id.unwrap())
+        };
+
+        let second_branch_id = create_branch(&pool, history_id, Some(first_branch_id), None).unwrap();
+        let other_id = insert_message(
+            &pool,
+            history_id,
+            second_branch_id,
+            None,
+            User.as_str(),
+            "other",
+            None,
+        )
+        .unwrap();
+        update_branch_head(&pool, second_branch_id, other_id).unwrap();
+
+        let snapshot = switch_branch(second_branch_id, &session, &pool).await.unwrap();
+
+        assert_eq!(snapshot.active_branch_id, Some(second_branch_id));
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.messages[0].content, "other");
+        assert_eq!(get_active_branch(&pool, history_id).unwrap(), second_branch_id);
+        assert_eq!(session.lock().await.active_branch_id, Some(second_branch_id));
+    }
+
+    #[tokio::test]
+    async fn delete_chat_removes_the_history_and_resets_the_current_session() {
+        let session = Mutex::new(ChatSession::default());
+        let pool = in_memory_pool();
+        let callback = |_: ChatEvent| {};
+
+        record_user_message(&session, &pool, &"hello".to_string(), &callback)
+            .await
+            .unwrap();
+
+        let (history_id, branch_id) = {
+            let state = session.lock().await;
+            (state.history_id.unwrap(), state.active_branch_id.unwrap())
+        };
+
+        delete_chat(history_id, &session, &pool).await.unwrap();
+
+        assert!(get_history(&pool).unwrap().is_empty());
+        assert!(load_branch(&pool, branch_id).unwrap().is_empty());
+
+        let state = session.lock().await;
+        assert!(state.history_id.is_none());
+        assert!(state.active_branch_id.is_none());
+        assert!(state.messages.is_empty());
+    }
+}

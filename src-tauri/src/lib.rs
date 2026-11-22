@@ -41,14 +41,7 @@ pub fn run() {
 
             Ok(())
         })
-        .manage(Mutex::new(ChatSession {
-            history_id: None,
-            messages: Vec::new(),
-            active: None,
-            next_generation_id: 0,
-            active_branch_id: None,
-            download: None,
-        }))
+        .manage(Mutex::new(ChatSession::default()))
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             send_message,

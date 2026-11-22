@@ -12,6 +12,10 @@ const MIGRATIONS: &[M] = &[
 
 const MIGRATOR: Migrations = Migrations::from_slice(MIGRATIONS);
 
+pub fn migrate(conn: &mut Connection) -> Result<(), rusqlite_migration::Error> {
+    MIGRATOR.to_latest(conn)
+}
+
 pub fn init(app: &AppHandle) -> Result<Connection, Box<dyn std::error::Error>> {
     let app_data_dir: PathBuf = app.path().app_data_dir()?;
 
@@ -24,7 +28,7 @@ pub fn init(app: &AppHandle) -> Result<Connection, Box<dyn std::error::Error>> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
 
-    MIGRATOR.to_latest(&mut conn)?;
+    migrate(&mut conn)?;
 
     Ok(conn)
 }

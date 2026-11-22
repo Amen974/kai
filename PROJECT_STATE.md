@@ -20,8 +20,9 @@ Backend (`src-tauri/`):
 ```
 cargo check           # typecheck
 cargo build           # build
+cargo test --lib      # backend unit tests
 ```
-There are no automated tests in the project.
+Backend unit tests live in `state.rs` and `services/chat_service.rs`. The DB-backed chat service tests open `Connection::open_in_memory()`, enable foreign keys and apply the real migration set through `database::init::migrate`. They cover the DB-backed flow (`record_user_message`, `load_chat`, `switch_branch`, `delete_chat`, `new_chat`, `persist_assistant`) and the streaming/finalize helpers (`LineBuffer`, `parse_line`, `apply_chunk`, `consume_stream` with a fake byte stream, `finalize_generation` for done/cancelled/eof/error). Everything that calls Ollama (`generate`, `send`, `resend`, `edit`, `create_title`, `title_if_missing`) is untested because it needs the network. There are no frontend tests.
 
 ## Structure
 
@@ -36,7 +37,7 @@ There are no automated tests in the project.
 - `models/chat_model.rs`: `ChatMessage`, `Role` (`User` | `Assistant`), `SessionSnapshot`, `MessageVariant`, `GetHistory`, `ActiveStream`, Ollama request/response types.
 - `models/chat_event.rs`: `ChatEvent` enum sent to the UI (tagged `type`): snapshot, deltas, generation finished, error, `HistoryChanged`, `ModelsChanged`, `ModelDownloadProgress`.
 - `models/error_model.rs`: `ChatError`; serialized to the frontend as its message string.
-- `database/init.rs`: opens `kai.db`, sets WAL + foreign keys, applies migrations.
+- `database/init.rs`: opens `kai.db`, sets WAL + foreign keys, applies migrations. `migrate` applies the migration set to any connection (used by the tests with an in-memory DB).
 - `database/repository.rs`: all SQL. Branch loading uses a recursive CTE from `branches.head_message_id` up through `parent_message_id`; `delete_last_message` moves the head to the new last message. Model catalog reads/writes: `get_models`, `replace_models`, `set_active_model`.
 - `database/migrations/001_initial_schema.sql`: `historys`, `branches`, `messages`.
 - `database/migrations/002_add_fts5.sql`: `history_fts5` virtual table plus triggers for history titles and `role = 'user'` messages.
@@ -87,4 +88,4 @@ There are no automated tests in the project.
 
 ## Known issues / open points
 - Ollama base URL is hardcoded in `ollama.rs`; no settings.
-- No tests and no CI.
+- No frontend tests and no CI. Network-dependent chat paths (`generate`/`send`/`resend`/`edit` and title generation) have no tests.
