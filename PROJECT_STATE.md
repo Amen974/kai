@@ -89,6 +89,6 @@ Backend unit tests live in `state.rs`, `services/chat_service.rs`, `services/mod
 ## Known issues / open points
 - Ollama base URL is hardcoded in `ollama.rs`; no settings.
 - No frontend tests; CI (`.github/workflows/cargo-test.yml`) runs `cargo test` in `src-tauri/` on every push, with build artifacts cached by `Swatinem/rust-cache`. Network-dependent chat paths (`generate`/`send`/`resend`/`edit` and title generation) have no tests, as do the Ollama-backed model catalog paths (`sync_models`, `download_model`, `delete_model`).
-- The CI workflow is unverified: it has never run on GitHub yet, so the ubuntu `runs-on` image, the Tauri system package list and the `src-tauri` working directory are hand-checked only.
+- CI has run once on `main` (run 1, conclusion success), so the ubuntu `runs-on` image, the Tauri system package list and the `src-tauri` working directory are confirmed working on that run. `README.md` carries the cargo test status badge for this workflow.
 - CI uses `ubuntu-latest` (currently 24.04) instead of a pinned image, so a runner image change can alter the available Tauri packages.
 - CI relies on the runner's preinstalled stable Rust toolchain; there is no `rust-toolchain.toml` or toolchain action pinning the version.
