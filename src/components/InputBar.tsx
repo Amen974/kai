@@ -1,8 +1,25 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { run, useMessages } from "../store/messages";
+import { detachAttachment, pickAttachments, run, useMessages } from "../store/messages";
 import { useUI } from "../store/ui";
+import { AttachmentChip } from "./AttachmentChip";
 
 const MAX_HEIGHT = 200;
+
+const PaperclipIcon = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.6"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M21.44 11.05 12.25 20.24a5.5 5.5 0 0 1-7.78-7.78l8.49-8.49a3.5 3.5 0 0 1 4.95 4.95l-8.49 8.49a1.5 1.5 0 0 1-2.12-2.12l7.78-7.78" />
+  </svg>
+);
 
 type InputBarProps = {
   isHome: boolean;
@@ -18,6 +35,7 @@ const InputBar = ({ isHome }: InputBarProps) => {
   const setMode = useUI((state) => state.setMode);
 
   const isGenerating = useMessages((state) => state.isGenerating);
+  const attachments = useMessages((state) => state.attachments);
   const error = useMessages((state) => state.error);
   const setError = useMessages((state) => state.setError);
 
@@ -27,6 +45,7 @@ const InputBar = ({ isHome }: InputBarProps) => {
   const isCompose = mode === "compose";
   const isOpen = isEdit || isCompose;
   const currentValue = isEdit ? editDraft : draft;
+  const pendingAttachments = isEdit ? [] : attachments;
 
   const resize = () => {
     const el = textareaRef.current;
@@ -54,7 +73,7 @@ const InputBar = ({ isHome }: InputBarProps) => {
 
   const handleSend = async () => {
     const trimmed = draft.trim();
-    if (!trimmed || isGenerating) return;
+    if ((!trimmed && attachments.length === 0) || isGenerating) return;
 
     setError(null);
     const savedDraft = draft;
@@ -114,31 +133,57 @@ const InputBar = ({ isHome }: InputBarProps) => {
           </div>
         )}
 
-        <div className="panel-card px-6 py-1 min-h-[9vh] flex items-center w-full">
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={currentValue}
-            onChange={(e) => {
-              if (isEdit) {
-                setEditDraft(e.target.value);
-              } else {
-                setDraft(e.target.value);
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
+        <div className="panel-card px-6 py-3 min-h-[9vh] flex flex-col justify-center gap-2 w-full">
+          {pendingAttachments.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {pendingAttachments.map((attachment) => (
+                <AttachmentChip
+                  key={attachment.path}
+                  attachment={attachment}
+                  onRemove={() => detachAttachment(attachment)}
+                />
+              ))}
+            </div>
+          )}
+
+          <div className="relative flex flex-col">
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={currentValue}
+              onChange={(e) => {
                 if (isEdit) {
-                  handleSaveEdit();
+                  setEditDraft(e.target.value);
                 } else {
-                  handleSend();
+                  setDraft(e.target.value);
                 }
-              }
-            }}
-            className="no-scrollbar overflow-y-auto max-h-50 resize-none outline-none text-base leading-6 tracking-widest placeholder:text-(--color-text-muted) w-full field-sizing-content"
-            placeholder={isEdit ? "Edit message" : undefined}
-          />
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  if (isEdit) {
+                    handleSaveEdit();
+                  } else {
+                    handleSend();
+                  }
+                }
+              }}
+              className={`no-scrollbar overflow-y-auto max-h-50 resize-none outline-none text-base leading-6 tracking-widest placeholder:text-(--color-text-muted) w-full field-sizing-content${isCompose ? " pr-9" : ""}`}
+              placeholder={isEdit ? "Edit message" : undefined}
+            />
+
+            {isCompose && (
+              <button
+                type="button"
+                onClick={() => void pickAttachments()}
+                title="Attach a .txt or image"
+                aria-label="Attach a file"
+                className="absolute right-0 bottom-0 inline-flex size-6 cursor-pointer items-center justify-center text-(--color-text-muted) transition-colors hover:text-(--color-text-main) focus-visible:text-(--color-text-main) focus-visible:outline-none"
+              >
+                <PaperclipIcon />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

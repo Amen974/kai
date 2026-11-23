@@ -1,5 +1,7 @@
 use tokio_util::sync::CancellationToken;
 
+use crate::models::attachment_model::Attachment;
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct MessageVariant {
     pub id: u32,
@@ -14,6 +16,10 @@ pub struct ChatMessage {
     pub(crate) role: Role,
     pub(crate) content: String,
     pub(crate) thinking: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) attachments: Vec<Attachment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) images: Option<Vec<String>>,
 }
 
 #[derive(serde::Serialize)]

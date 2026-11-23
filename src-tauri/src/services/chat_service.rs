@@ -7,21 +7,24 @@ use tokio_util::{bytes::Bytes, sync::CancellationToken};
 
 use crate::{
     database::repository::{
-        create_branch, create_history, delete_history, delete_last_message, get_active_branch,
-        get_head_message_id, get_nth_message_id, insert_message, load_branch, set_active_branch,
-        touch_history, update_branch_head, update_title,
+        attachment_paths_for_history, create_branch, create_history, delete_history,
+        delete_last_message, get_active_branch,
+        get_head_message_id, get_nth_message_id, insert_attachments, insert_message, load_branch,
+        set_active_branch, touch_history, update_branch_head, update_title,
     },
     models::{
+        ai_model::AiModel,
+        attachment_model::{Attachment, AttachmentKind},
         chat_event::ChatEvent,
         chat_model::{
-            OllamaMessage, OllamaRequest, OllamaRequestGenerate, OllamaResponse,
+            ChatMessage, OllamaMessage, OllamaRequest, OllamaRequestGenerate, OllamaResponse,
             Role::{Assistant, User},
             SessionSnapshot,
         },
         error_model::ChatError,
     },
     ollama::{post_chat, post_generate},
-    services::model_service,
+    services::{attachment_service, model_service},
     state::ChatSession,
 };
 
@@ -62,6 +65,58 @@ impl LineBuffer {
         self.buf.drain(..=pos);
         Some(String::from_utf8(line_bytes).map_err(ChatError::Utf8))
     }
+}
+
+fn with_attachments(
+    mut messages: Vec<ChatMessage>,
+    model_name: &str,
+    supports_vision: bool,
+) -> Result<Vec<ChatMessage>, ChatError> {
+    for message in &mut messages {
+        if message.attachments.is_empty() {
+            continue;
+        }
+
+        let mut images = Vec::new();
+
+        for attachment in &message.attachments {
+            match attachment.kind {
+                AttachmentKind::Text => {
+                    let text = attachment_service::read_text(attachment)?;
+                    message.content.push_str(&format!("\n\nAttached file:\n{text}"));
+                }
+                AttachmentKind::Image => {
+                    attachment_service::require_vision(model_name, supports_vision)?;
+                    images.push(attachment_service::read_image_base64(attachment)?);
+                }
+            }
+        }
+
+        if !images.is_empty() {
+            message.images = Some(images);
+        }
+    }
+
+    Ok(messages)
+}
+
+fn validate_pending(
+    pending: &[Attachment],
+    model_name: &str,
+    supports_vision: bool,
+) -> Result<(), ChatError> {
+    for attachment in pending {
+        match attachment.kind {
+            AttachmentKind::Image => {
+                attachment_service::require_vision(model_name, supports_vision)?
+            }
+            AttachmentKind::Text => {
+                attachment_service::read_text(attachment)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_line(line: &str) -> Result<Option<OllamaResponse>, ChatError> {
@@ -315,35 +370,41 @@ async fn finalize_generation(
     }
 }
 
+async fn active_model_or_sync(
+    pool: &std::sync::Mutex<Connection>,
+    update_callback: &impl Fn(ChatEvent),
+) -> Result<AiModel, ChatError> {
+    match model_service::active_model(pool)? {
+        Some(model) => Ok(model),
+        None => {
+            model_service::sync_models(pool).await?;
+            let model = model_service::active_model(pool)?.ok_or(ChatError::NoActiveModel)?;
+            update_callback(ChatEvent::ModelsChanged);
+            Ok(model)
+        }
+    }
+}
+
 async fn generate(
     session_mutex: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
     update_callback: &impl Fn(ChatEvent),
 ) -> Result<(), ChatError> {
-    let model = match model_service::active_model(pool)? {
-        Some(model) => model.name,
-        None => {
-            model_service::sync_models(pool).await?;
-            let model = model_service::active_model(pool)?
-                .ok_or(ChatError::NoActiveModel)?
-                .name;
-            update_callback(ChatEvent::ModelsChanged);
-            model
-        }
-    };
+    let model = active_model_or_sync(pool, update_callback).await?;
 
     let (generation_id, token, snapshot, request_messages) = {
         let mut state = session_mutex.lock().await;
+        let request_messages =
+            with_attachments(state.messages.clone(), &model.name, model.supports_vision)?;
         let (generation_id, token) = state.begin_generation()?;
         state.push_assistant_placeholder();
         let snapshot = snapshot_event(&state);
-        let request_messages = state.messages[..state.messages.len() - 1].to_vec();
         (generation_id, token, snapshot, request_messages)
     };
     update_callback(snapshot);
 
     let payload = OllamaRequest {
-        model,
+        model: model.name,
         messages: request_messages,
         stream: true,
     };
@@ -387,14 +448,42 @@ pub async fn title_if_missing(
     message: &String,
     update_callback: &impl Fn(ChatEvent),
 ) {
-    let history_id = {
+    let (history_id, attachment_names) = {
         let state = session_mutex.lock().await;
-        state.history_id
+        let names = state
+            .messages
+            .iter()
+            .rev()
+            .find(|message| matches!(message.role, User))
+            .map(|message| {
+                message
+                    .attachments
+                    .iter()
+                    .map(|attachment| attachment.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        (state.history_id, names)
     };
 
     let Some(hid) = history_id else {
         return;
     };
+
+    if message.trim().is_empty() {
+        if attachment_names.is_empty() {
+            return;
+        }
+
+        if let Err(err) = update_title(pool, &attachment_names.join(", "), &hid) {
+            update_callback(ChatEvent::Error {
+                message: err.to_string(),
+            });
+            return;
+        }
+        update_callback(ChatEvent::HistoryChanged);
+        return;
+    }
 
     if let Err(err) = update_title(pool, message, &hid) {
         update_callback(ChatEvent::Error {
@@ -419,11 +508,11 @@ async fn record_user_message(
     content: &String,
     update_callback: &impl Fn(ChatEvent),
 ) -> Result<(bool, u32), ChatError> {
-    if content.trim().is_empty() {
+    let mut state = session_mutex.lock().await;
+
+    if content.trim().is_empty() && state.pending_attachments.is_empty() {
         return Err(ChatError::EmptyMessage);
     }
-
-    let mut state = session_mutex.lock().await;
 
     let is_new = state.history_id.is_none();
     if is_new {
@@ -453,6 +542,25 @@ async fn record_user_message(
     touch_history(pool, history_id)?;
 
     state.push_user(content.clone(), Some(new_id), parent_message_id);
+
+    let attachments = state.take_pending_attachments();
+    if !attachments.is_empty() {
+        let stored = insert_attachments(pool, new_id, &attachments);
+        match stored {
+            Ok(stored) => {
+                if let Some(message) = state.messages.last_mut() {
+                    message.attachments = stored;
+                }
+            }
+            Err(err) => {
+                for attachment in attachments {
+                    state.add_pending_attachment(attachment);
+                }
+                return Err(err);
+            }
+        }
+    }
+
     update_callback(snapshot_event(&state));
 
     Ok((is_new, new_id))
@@ -464,6 +572,12 @@ pub async fn send(
     pool: &std::sync::Mutex<Connection>,
     update_callback: impl Fn(ChatEvent),
 ) -> Result<bool, ChatError> {
+    let pending = { session.lock().await.pending_attachments.clone() };
+    if !pending.is_empty() {
+        let model = active_model_or_sync(pool, &update_callback).await?;
+        validate_pending(&pending, &model.name, model.supports_vision)?;
+    }
+
     let (is_new, _) = record_user_message(session, pool, &message, &update_callback).await?;
     generate(session, pool, &update_callback).await?;
     Ok(is_new)
@@ -534,6 +648,9 @@ pub async fn load_chat(
 ) -> Result<SessionSnapshot, ChatError> {
     cancel_generation(session).await;
 
+    let discarded = session.lock().await.take_pending_attachments();
+    attachment_service::discard(discarded.iter().map(|attachment| attachment.path.as_str()))?;
+
     let active_branch_id = get_active_branch(pool, id)?;
 
     let messages = load_branch(pool, active_branch_id)?;
@@ -556,6 +673,9 @@ pub async fn switch_branch(
         state.history_id.ok_or(ChatError::NoActiveBranch)?
     };
 
+    let discarded = session.lock().await.take_pending_attachments();
+    attachment_service::discard(discarded.iter().map(|attachment| attachment.path.as_str()))?;
+
     let messages = load_branch(pool, branch_id)?;
 
     set_active_branch(pool, branch_id, history_id)?;
@@ -567,12 +687,15 @@ pub async fn switch_branch(
     Ok(state.snapshot())
 }
 
-pub async fn new_chat(session: &Mutex<ChatSession>) -> SessionSnapshot {
+pub async fn new_chat(session: &Mutex<ChatSession>) -> Result<SessionSnapshot, ChatError> {
     cancel_generation(session).await;
+
+    let discarded = session.lock().await.take_pending_attachments();
+    attachment_service::discard(discarded.iter().map(|attachment| attachment.path.as_str()))?;
 
     let mut state = session.lock().await;
     state.reset();
-    state.snapshot()
+    Ok(state.snapshot())
 }
 
 pub async fn delete_chat(
@@ -580,6 +703,8 @@ pub async fn delete_chat(
     session: &Mutex<ChatSession>,
     pool: &std::sync::Mutex<Connection>,
 ) -> Result<(), ChatError> {
+    let mut paths = attachment_paths_for_history(pool, id)?;
+
     let is_current = {
         let state = session.lock().await;
         state.history_id == Some(id)
@@ -587,12 +712,19 @@ pub async fn delete_chat(
 
     if is_current {
         cancel_generation(session).await;
-        let mut state = session.lock().await;
-        state.reset();
+
+        let discarded = {
+            let mut state = session.lock().await;
+            let pending = state.take_pending_attachments();
+            state.reset();
+            pending
+        };
+        paths.extend(discarded.into_iter().map(|attachment| attachment.path));
     }
 
     delete_history(id, pool)?;
-    Ok(())
+
+    attachment_service::discard(paths.iter().map(String::as_str))
 }
 
 pub async fn cancel_generation(session: &Mutex<ChatSession>) {
@@ -649,6 +781,20 @@ mod test {
     fn generation_session() -> (Mutex<ChatSession>, u32, CancellationToken) {
         let (session, generation_id) = session_ready_for_generation();
         (Mutex::new(session), generation_id, CancellationToken::new())
+    }
+
+    #[test]
+    fn with_attachments_rejects_an_image_when_the_model_cannot_read_images() {
+        let path = std::path::Path::new("missing-on-purpose.png");
+        let result = with_attachments(
+            vec![attachment_message(AttachmentKind::Image, path)],
+            "qwen3:4b",
+            false,
+        );
+
+        assert!(
+            matches!(result, Err(ChatError::AttachmentNeedsVisionModel(name)) if name == "qwen3:4b")
+        );
     }
 
     #[test]
@@ -1351,7 +1497,7 @@ mod test {
             .await
             .unwrap();
 
-        let snapshot = new_chat(&session).await;
+        let snapshot = new_chat(&session).await.unwrap();
 
         assert!(snapshot.history_id.is_none());
         assert!(snapshot.messages.is_empty());
@@ -1570,4 +1716,109 @@ mod test {
         assert!(state.active_branch_id.is_none());
         assert!(state.messages.is_empty());
     }
+
+    fn temp_file(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("kai-test-{}-{name}", std::process::id()));
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    fn user_message(content: &str) -> ChatMessage {
+        ChatMessage {
+            id: None,
+            parent_message_id: None,
+            role: User,
+            content: content.to_string(),
+            thinking: None,
+            attachments: Vec::new(),
+            images: None,
+        }
+    }
+
+    fn attachment_message(kind: AttachmentKind, path: &std::path::Path) -> ChatMessage {
+        ChatMessage {
+            attachments: vec![crate::models::attachment_model::Attachment {
+                id: None,
+                name: path.file_name().unwrap().to_string_lossy().to_string(),
+                kind,
+                mime_type: "text/plain".to_string(),
+                path: path.to_string_lossy().to_string(),
+                size_bytes: 0,
+            }],
+            ..user_message("look")
+        }
+    }
+
+    #[test]
+    fn with_attachments_appends_text_file_content() {
+        let path = temp_file("notes.txt", b"file body");
+
+        let messages = with_attachments(
+            vec![
+                user_message("question"),
+                attachment_message(AttachmentKind::Text, &path),
+            ],
+            "qwen3:4b",
+            false,
+        )
+        .unwrap();
+
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(messages[0].content, "question");
+        assert!(messages[0].images.is_none());
+        assert_eq!(messages[1].content, "look
+
+Attached file:
+file body");
+        assert!(messages[1].images.is_none());
+    }
+
+    #[test]
+    fn with_attachments_encodes_an_image_for_a_vision_model() {
+        let path = temp_file("photo.png", b"foo");
+
+        let messages = with_attachments(
+            vec![attachment_message(AttachmentKind::Image, &path)],
+            "llava:7b",
+            true,
+        )
+        .unwrap();
+
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(messages[0].content, "look");
+        assert_eq!(messages[0].images, Some(vec!["Zm9v".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn record_user_message_persists_pending_attachments() {
+        let session = Mutex::new(ChatSession::default());
+        let pool = in_memory_pool();
+        let callback = |_: ChatEvent| {};
+        let pending = crate::models::attachment_model::Attachment {
+            id: None,
+            name: "notes.txt".to_string(),
+            kind: AttachmentKind::Text,
+            mime_type: "text/plain".to_string(),
+            path: "/tmp/notes.txt".to_string(),
+            size_bytes: 12,
+        };
+        session.lock().await.add_pending_attachment(pending);
+
+        let (_, message_id) = record_user_message(&session, &pool, &String::new(), &callback)
+            .await
+            .unwrap();
+
+        let state = session.lock().await;
+        let branch_id = state.active_branch_id.unwrap();
+        assert!(state.pending_attachments.is_empty());
+        assert_eq!(state.messages[0].attachments.len(), 1);
+        assert!(state.messages[0].attachments[0].id.is_some());
+        drop(state);
+
+        let persisted = load_branch(&pool, branch_id).unwrap();
+        assert_eq!(persisted[0].id, Some(message_id));
+        assert_eq!(persisted[0].attachments.len(), 1);
+        assert_eq!(persisted[0].attachments[0].name, "notes.txt");
+    }
+
 }
