@@ -97,7 +97,7 @@ Backend unit tests live in `state.rs`, `services/chat_service.rs`, `services/mod
 - `src-tauri/tauri.conf.json` sets product name `kai`, version `1.0.0`, identifier `com.aamen.kai`, bundle metadata (publisher, copyright, category, descriptions) and NSIS `installMode: currentUser`. `targets: "all"` resolves to NSIS + MSI on Windows and AppImage + deb on Linux.
 - User data lives in the per-user app data dir (`%APPDATA%\com.aamen.kai\kai.db` on Windows, `~/.local/share/com.aamen.kai/kai.db` on Linux); migrations are compiled in with `include_str!`, so no data files ship next to the binary.
 - `.github/workflows/release.yml` runs on `v*` tags: a `windows-latest` job builds `--bundles nsis,msi` and an `ubuntu-22.04` job builds `--bundles appimage,deb`, both uploading to a draft Release through `tauri-apps/tauri-action`. It uses only the built-in `GITHUB_TOKEN`.
-- `@tauri-apps/api` is pinned to `~2.12.0` because the Rust `tauri` crate is `2.12.x`; `tauri build` refuses to bundle when the NPM package and the crate are on different minor versions.
+- `@tauri-apps/api` is pinned to `~2.12.0` because the Rust `tauri` crate is `2.12.x`; `tauri build` refuses to bundle when the NPM package and the crate are on different minor versions. The same rule applies per plugin: `tauri-plugin-dialog` and `@tauri-apps/plugin-dialog` are both on `2.8.x`, and `tauri-plugin-opener` and `@tauri-apps/plugin-opener` are both on `2.5.x`.
 - Ollama and models are deliberately not bundled; they are the user's responsibility, and the app only reports when they are missing.
 
 ## Known issues / open points
